@@ -5,16 +5,25 @@
 package frc.robot.subsystems;
 
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.MotorAlignmentValue;
 
 import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
-public class ExampleSubsystem extends SubsystemBase {
+public class IntakeSubsystem extends SubsystemBase {
   /** Creates a new ExampleSubsystem. */
   double targetSpeed = 0.0;
-  private final TalonFX exampleMotor = new TalonFX(Constants.ExampleConstants.ExampleMotorID, "CanBusName");
-  public ExampleSubsystem() {}
+  private final TalonFX intakeLeaderMotor = new TalonFX(Constants.IntakeConstants.IntakeLeaderID, Constants.UpperCanBus);
+  private final TalonFX intakeFollowerMotor = new TalonFX(Constants.IntakeConstants.IntakefollowerID, Constants.UpperCanBus);
+  private final TalonFX intakeReversedMotor = new TalonFX(Constants.IntakeConstants.ReversedIntakeID, Constants.UpperCanBus);
+  private final TalonFX intakeReversedMotorTwo = new TalonFX(Constants.IntakeConstants.ReversedIntakeID2, Constants.UpperCanBus);
+
+  //intakeFollowerMotor.setControl(new Follower(Constants.IntakeConstants.IntakeMotorID, MotorAlignmentValue.Opposed));
+
+  public IntakeSubsystem() {
+    intakeFollowerMotor.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Aligned));
+  }
 
   public void set(double speed){
     exampleMotor.set(speed);
