@@ -6,6 +6,9 @@ package frc.robot.subsystems;
 
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.TalonFXConfigurator;
+import com.ctre.phoenix6.controls.Follower;
 
 import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -19,19 +22,35 @@ public class IntakeSubsystem extends SubsystemBase {
   private final TalonFX intakeReversedMotor = new TalonFX(Constants.IntakeConstants.ReversedIntakeID, Constants.UpperCanBus);
   private final TalonFX intakeReversedMotorTwo = new TalonFX(Constants.IntakeConstants.ReversedIntakeID2, Constants.UpperCanBus);
 
-  //intakeFollowerMotor.setControl(new Follower(Constants.IntakeConstants.IntakeMotorID, MotorAlignmentValue.Opposed));
+  private final TalonFXConfigurator intakeLeaderConfigurator = intakeLeaderMotor.getConfigurator();
+  private final TalonFXConfigurator intakeFollowerMotorConfigurator = intakeFollowerMotor.getConfigurator();
+  private final TalonFXConfigurator intakeReversedMotorConfigurator = intakeReversedMotor.getConfigurator();
+  private final TalonFXConfigurator intakeReversedMotorTwoConfigurator = intakeReversedMotorTwo.getConfigurator();
+
+  CurrentLimitsConfigs limitConfigs = new CurrentLimitsConfigs();
+
 
   public IntakeSubsystem() {
     intakeFollowerMotor.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Aligned));
+    intakeReversedMotor.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
+    intakeReversedMotorTwo.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
+
+    limitConfigs.SupplyCurrentLimit = 60;
+    limitConfigs.SupplyCurrentLimitEnable = true;
+
+    intakeLeaderConfigurator.apply(limitConfigs);
+    intakeFollowerMotorConfigurator.apply(limitConfigs);
+    intakeReversedMotorConfigurator.apply(limitConfigs);
+    intakeReversedMotorTwoConfigurator.apply(limitConfigs);
   }
 
   public void set(double speed){
-    exampleMotor.set(speed);
+    intakeLeaderMotor.set(speed);
     targetSpeed = speed;
   }
 
   public void stop (){
-    exampleMotor.set(0.0);
+    intakeLeaderMotor.set(0.0);
     DogLog.log("ExampleMotor/Speed", 0.0);
     targetSpeed = 0.0;
   }
@@ -40,7 +59,5 @@ public class IntakeSubsystem extends SubsystemBase {
   public void periodic() {
     // This method will be called once per scheduler run
     DogLog.log("ExampleMotor/Speed", targetSpeed); 
-    //this will log whatever targetSpeed is under robot/ExampleMotor/speed (each "/"" is a new folder in logs)
-    //Check these in AdvnatageScope or Elastic (Elastic for on the field feedback, AdvantageScope for debugging) (Wpi buttion -> start tool -> whatever tool u want)
   }
 }

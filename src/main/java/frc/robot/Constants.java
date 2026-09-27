@@ -1,4 +1,7 @@
 package frc.robot;
+import static edu.wpi.first.units.Units.* ;
+
+import edu.wpi.first.units.measure.Angle;
 
 public class Constants {
 
@@ -16,6 +19,23 @@ public class Constants {
             public static final int ReversedIntakeID = 72;
             public static final int ReversedIntakeID2 = 73;
 
+            public static final double SlowSpeed = 0.5;
+            public static final double Fast = 1.0;
+            public static final double RevSlowSpeed = -0.5;
+            public static final double RevFast = -1.0;
 
+            public static final Angle PivotLowSetpoint = Degrees.of(90); //based on pivot 
+            public static final Angle PivotHighSetpoint = Degrees.of(90+120); //also starting
+
+        }
+
+        public static abstract class KickerConstants{
+            public static final int KickerLeaderID = 70;
+            public static final int KickerFollowerID = 71;
+
+            public static final double SlowSpeed = 0.5;
+            public static final double Fast = 1.0;
+            public static final double RevSlowSpeed = -0.5;
+            public static final double RevFast = -1.0;
         }
 }

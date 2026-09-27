@@ -107,7 +107,7 @@ public class RobotContainer {
 
         //EVERYTHING ABOVE IS PREGENERATED, EVERTHING BELOW IS MY CODE WOOO
         //in pressing the A button on the controller, set superstructure state to STATE1
-        joystick.a().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STATE1)));
+        //joystick.a().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STATE1)));
     }
 
     public Command getAutonomousCommand() {

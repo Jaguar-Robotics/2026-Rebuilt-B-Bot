@@ -6,35 +6,39 @@ package frc.robot.Handlers;
 
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
-import frc.robot.subsystems.ExampleSubsystem;
+import frc.robot.subsystems.IntakeSubsystem;
+import frc.robot.subsystems.KickerSubsystem;
 
-public class ExampleHandler extends SubsystemBase implements StateSubsystem {
+public class IntakeHandler extends SubsystemBase implements StateSubsystem {
 
-    public enum ExampleState implements State {
+    public enum IntakeState implements State {
         FAST,
+        REVFAST,
         SLOW,
+        REVSLOW,
         OFF
   }
 
-  private static ExampleHandler instance;
-  private final ExampleSubsystem exampleSubsystemName = new ExampleSubsystem();
+  private static IntakeHandler instance;
+  private final IntakeSubsystem intakeSubsystem = new IntakeSubsystem();
+  private final KickerSubsystem kickerSubsystem = new KickerSubsystem();
 
-  private ExampleState desiredState = ExampleState.OFF;
-  private ExampleState currentState = ExampleState.OFF;
+  private IntakeState desiredState = IntakeState.OFF;
+  private IntakeState currentState = IntakeState.OFF;
   /** Creates a new IntakeHandler. */
-  private ExampleHandler() {}
+  private IntakeHandler() {}
 
-  public static ExampleHandler getInstance(){
+  public static IntakeHandler getInstance(){
     if (instance == null){
-      instance = new ExampleHandler();
+      instance = new IntakeHandler();
     }
     return instance;
   }
 
   @Override
   public void setDesiredState(State state){
-        if (state instanceof ExampleState ExampleState && desiredState != ExampleState) {
-        desiredState = ExampleState;
+        if (state instanceof IntakeState IntakeState && desiredState != IntakeState) {
+        desiredState = IntakeState;
     }
   }
 
@@ -48,20 +52,30 @@ public class ExampleHandler extends SubsystemBase implements StateSubsystem {
       if((currentState != desiredState)){
         switch (desiredState) {
             case FAST:
-                exampleSubsystemName.set(Constants.ExampleConstants.Fast);
+                intakeSubsystem.set(Constants.IntakeConstants.Fast);
+                kickerSubsystem.set(Constants.KickerConstants.Fast);
+            break;
+            case REVFAST:
+                intakeSubsystem.set(Constants.IntakeConstants.RevFast);
+                kickerSubsystem.set(Constants.KickerConstants.RevFast);
             break;
             case SLOW:
-                exampleSubsystemName.set(Constants.ExampleConstants.Slow);
+                intakeSubsystem.set(Constants.IntakeConstants.SlowSpeed);
+                kickerSubsystem.set(Constants.KickerConstants.SlowSpeed);
             break;
+            case REVSLOW:
+                intakeSubsystem.set(Constants.IntakeConstants.RevSlowSpeed);
+                kickerSubsystem.set(Constants.KickerConstants.RevSlowSpeed);
             case OFF:
-                exampleSubsystemName.stop();
+                intakeSubsystem.stop();
+                kickerSubsystem.stop();
             break;
         }
         currentState = desiredState;
     }
   }
 
-    public ExampleState getCurrentState() {
+    public IntakeState getCurrentState() {
       return currentState;
   }
 

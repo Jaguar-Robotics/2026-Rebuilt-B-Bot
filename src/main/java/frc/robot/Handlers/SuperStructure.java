@@ -16,15 +16,16 @@ public class SuperStructure extends SubsystemBase {
 
   // Define your states in all caps
   public enum SuperStructureState {
-    STATE1,
-    STATE2,
+    INTAKE,
+    JERK,
+    POOP,
     IDLE
   }
 
   private static SuperStructure instance;
   
   //private final ShooterSubsystem Shooter = new ShooterSubsystem();
-  private final ExampleHandler exampleHandler = ExampleHandler.getInstance();
+  private final IntakeHandler intakeHandler = IntakeHandler.getInstance();
 
   private SuperStructureState desiredState = SuperStructureState.IDLE;
   private SuperStructureState currentState = SuperStructureState.IDLE;
@@ -53,14 +54,17 @@ public class SuperStructure extends SubsystemBase {
   /** Handles transitions between states (2910-style logic). */
   private void handleStateTransition() {
     switch (desiredState) {
-        case STATE1:
-            exampleHandler.setDesiredState(ExampleHandler.ExampleState.FAST);
+        case INTAKE:
+            intakeHandler.setDesiredState(IntakeHandler.IntakeState.FAST);
         break;
-        case STATE2:
-            exampleHandler.setDesiredState(ExampleHandler.ExampleState.SLOW);
+        case JERK:
+            intakeHandler.setDesiredState(IntakeHandler.IntakeState.REVFAST);
+        break;
+        case POOP:
+            intakeHandler.setDesiredState(IntakeHandler.IntakeState.REVFAST);
         break;
         case IDLE:
-            exampleHandler.setDesiredState(ExampleHandler.ExampleState.OFF);
+            intakeHandler.setDesiredState(IntakeHandler.IntakeState.OFF);
         break;
     }
     currentState = desiredState;
