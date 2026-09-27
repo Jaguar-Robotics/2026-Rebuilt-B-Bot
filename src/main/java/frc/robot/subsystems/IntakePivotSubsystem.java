@@ -2,11 +2,10 @@
 package frc.robot.subsystems;
 
 import static edu.wpi.first.units.Units.Amps;
-import static edu.wpi.first.units.Units.Degree;
 import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.DegreesPerSecond;
 import static edu.wpi.first.units.Units.Inches;
 import static edu.wpi.first.units.Units.Meters;
-import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.Radians;
 import static edu.wpi.first.units.Units.RadiansPerSecond;
 import static edu.wpi.first.units.Units.Rotation;
@@ -14,24 +13,17 @@ import static edu.wpi.first.units.Units.Rotations;
 import static edu.wpi.first.units.Units.RotationsPerSecond;
 
 import com.ctre.phoenix6.BaseStatusSignal;
-import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.GravityTypeValue;
 import com.ctre.phoenix6.sim.ChassisReference;
 import com.ctre.phoenix6.sim.TalonFXSimState;
 
 import dev.doglog.DogLog;
-import edu.wpi.first.math.geometry.Pose3d;
-import edu.wpi.first.math.geometry.Rotation3d;
-import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.system.plant.DCMotor;
-import edu.wpi.first.networktables.NetworkTableInstance;
-import edu.wpi.first.networktables.StructPublisher;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.Current;
@@ -39,34 +31,39 @@ import edu.wpi.first.units.measure.Distance;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
+import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
+import edu.wpi.first.wpilibj.smartdashboard.MechanismRoot2d;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.util.Color8Bit;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants;
-import frc.robot.subsystems.*;
-public class IntakePivot extends SubsystemBase {
+public class IntakePivotSubsystem extends SubsystemBase {
     /** Position setpoints for the elevator. */
 
     /** The position target of the setpoint in angular units. */
     private Angle target = Degrees.of(0);
-    private MechanismLigament2d motor_id_35Mech2d;
+    private MechanismLigament2d IntakePivotMotorMech2d;
+    private final Mechanism2d mech2d = new Mechanism2d(3, 3); // canvas size in meters, tune to your robot
+    private final MechanismRoot2d mech2dRoot = mech2d.getRoot("IntakePivotPivot", 1.5, 0.5); // x, y of pivot point
+
 
     private static final int kNumConfigAttempts = 2;
 
-    private static final double kGearRatio =(15/38) * (1/23);
-    private static final Distance kArmLength = Inches.of(16);
-    private static final Angle kMinAngle = Degrees.of(90);   // lower hard stop
-    private static final Angle kMaxAngle = Degrees.of(120);   // upper hard stop ******************
+    private static final double kGearRatio = (38.0/15) * 23.0; //(15.0/38) * (1.0/23);
+    private static final Distance kArmLength = Inches.of(13.75);  
+    private static final Angle kMinAngle = Constants.IntakeConstants.PivotLowSetpoint;  
+    private static final Angle kMaxAngle = Constants.IntakeConstants.PivotHighSetpoint;   
 
 
     /* leader and follower motors */
-    private final TalonFX motor_id_35 = new TalonFX(34, "Upper");
+    private final TalonFX IntakePivotMotor = new TalonFX(Constants.IntakeConstants.IntakePivotMotorID, Constants.UpperCanBus);
 
     /* device status signals */
-    private final StatusSignal<Angle> motor_id_35Position = motor_id_35.getPosition(false);
-    private final StatusSignal<AngularVelocity> motor_id_35Velocity = motor_id_35.getVelocity(false);
-    private final StatusSignal<Current> motor_id_35TorqueCurrent = motor_id_35.getTorqueCurrent(false);
+    private final StatusSignal<Angle> IntakePivotMotorPosition = IntakePivotMotor.getPosition(false);
+    private final StatusSignal<AngularVelocity> IntakePivotMotorVelocity = IntakePivotMotor.getVelocity(false);
+    private final StatusSignal<Current> IntakePivotMotorTorqueCurrent = IntakePivotMotor.getTorqueCurrent(false);
 
     /* controls used by the leader motors */
     private final MotionMagicVoltage setpointRequest = new MotionMagicVoltage(0);
@@ -80,20 +77,20 @@ public class IntakePivot extends SubsystemBase {
 
     /** Trigger to detect when the elevator drives into a hard stop. */
     public final Trigger isHardStop = new Trigger(() -> {
-        return motor_id_35Velocity.getValue().abs(RotationsPerSecond) < 1 &&
-            motor_id_35TorqueCurrent.getValue().abs(Amps) > 10;
+        return IntakePivotMotorVelocity.getValue().abs(RotationsPerSecond) < 1 &&
+            IntakePivotMotorTorqueCurrent.getValue().abs(Amps) > 10;
     }).debounce(0.1);
 
     /* simulation */
-    private final SingleJointedArmSim armSim_motor_id_35 = new SingleJointedArmSim(
-        DCMotor.getKrakenX44(1),
+    private final SingleJointedArmSim armSim_IntakePivotMotor = new SingleJointedArmSim(
+        DCMotor.getKrakenX60(1), 
         kGearRatio,
         SingleJointedArmSim.estimateMOI(kArmLength.in(Meters), 1.8), 
         kArmLength.in(Meters),
         kMinAngle.in(Radians),
         kMaxAngle.in(Radians),
         true, // simulate gravity
-        Degrees.of(90).in(Radians) // starting angle kMinAngle.in(Radians)
+        Constants.IntakeConstants.PivotHighSetpoint.in(Radians) // starting angle kMinAngle.in(Radians)
     );
 
     private static final double kSimLoopPeriod = 0.002; // 2 ms
@@ -106,21 +103,21 @@ public class IntakePivot extends SubsystemBase {
     static { 
         motorInitialConfigs.Feedback.SensorToMechanismRatio = kGearRatio;
         motorInitialConfigs.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
-        motorInitialConfigs.SoftwareLimitSwitch.ForwardSoftLimitThreshold = Degrees.of(100).in(Rotation);
+        motorInitialConfigs.SoftwareLimitSwitch.ForwardSoftLimitThreshold = Constants.IntakeConstants.PivotHighSetpoint.in(Rotation);
         motorInitialConfigs.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
-        motorInitialConfigs.SoftwareLimitSwitch.ReverseSoftLimitThreshold = Degrees.of(-105).in(Rotations);
+        motorInitialConfigs.SoftwareLimitSwitch.ReverseSoftLimitThreshold = Constants.IntakeConstants.PivotLowSetpoint.in(Rotations);
         motorInitialConfigs.ClosedLoopGeneral.ContinuousWrap = false;
     }
 
     /** Configs common across just the leader motors. */
     private static final TalonFXConfiguration leaderInitialConfigs = motorInitialConfigs.clone();
 
-    /** Configs for {@link #motor_id_35}. */
-    private final TalonFXConfiguration motor_id_35Configs = leaderInitialConfigs.clone();
+    /** Configs for {@link #IntakePivotMotor}. */
+    private final TalonFXConfiguration IntakePivotMotorConfigs = leaderInitialConfigs.clone();
 
     static {
     // Configure MotionMagic for the leader motors 
-    leaderInitialConfigs.Slot0.kP = 150;  // Tune these values!
+    leaderInitialConfigs.Slot0.kP = 20;  // Tune these values!
     leaderInitialConfigs.Slot0.kI = 0.0;
     leaderInitialConfigs.Slot0.kD = 0.5;
     leaderInitialConfigs.Slot0.kG = 0.2;
@@ -132,12 +129,27 @@ public class IntakePivot extends SubsystemBase {
     
     }
 
-    public IntakePivot() {
+    public IntakePivotSubsystem() {
 
         for (int i = 0; i < kNumConfigAttempts; ++i) {
-            var status = motor_id_35.getConfigurator().apply(motor_id_35Configs);
+            var status = IntakePivotMotor.getConfigurator().apply(IntakePivotMotorConfigs);
             if (status.isOK()) break;
         }
+
+
+        // Create the ligament representing the arm, attach it to the root
+        IntakePivotMotorMech2d = mech2dRoot.append(
+            new MechanismLigament2d(
+                "IntakePivot",
+                kArmLength.in(Meters),   // length of the drawn arm
+                kMinAngle.in(Degrees),   // starting angle
+                6,                        // line width
+                new Color8Bit(255, 0, 0) // color
+            )
+        );
+
+        // Publish the mechanism so it shows up in Glass/Shuffleboard/logs
+        SmartDashboard.putData("IntakePivot/Mechanism2d", mech2d);
 
 
         /* set the default command to neutral output */
@@ -154,21 +166,21 @@ public class IntakePivot extends SubsystemBase {
      * @return The Position of the elevator
      */
     public Angle getPosition() {
-        return motor_id_35Position.getValue();
+        return IntakePivotMotorPosition.getValue();
     }
 
     /**
      * @return The Velocity of the elevator
      */
     public AngularVelocity getVelocity() {
-        return motor_id_35Velocity.getValue();
+        return IntakePivotMotorVelocity.getValue();
     }
 
     /**
      * @return The TorqueCurrent of the elevator
      */
     public Current getTorqueCurrent() {
-        return motor_id_35TorqueCurrent.getValue();
+        return IntakePivotMotorTorqueCurrent.getValue();
     }
 
     /**
@@ -176,8 +188,8 @@ public class IntakePivot extends SubsystemBase {
      * Call this every loop you want the elevator held in place.
      */
     public void holdPosition() {
-        setpointRequest.withPosition(motor_id_35Position.getValue());
-        motor_id_35.setControl(setpointRequest);
+        setpointRequest.withPosition(IntakePivotMotorPosition.getValue());
+        IntakePivotMotor.setControl(setpointRequest);
     }
 
 
@@ -190,7 +202,7 @@ public class IntakePivot extends SubsystemBase {
     public void goToSetpoint(Angle target) {
         this.target = target;
         setpointRequest.withPosition(target);
-        motor_id_35.setControl(setpointRequest);
+        IntakePivotMotor.setControl(setpointRequest);
         System.out.print(target.in(Radians));
     }
 
@@ -203,7 +215,7 @@ public class IntakePivot extends SubsystemBase {
      */
     public void manualDrive(double manualOutput) {
         manualRequest.withOutput(manualOutput);
-        motor_id_35.setControl(manualRequest);
+        IntakePivotMotor.setControl(manualRequest);
     }
 
 
@@ -217,13 +229,13 @@ public class IntakePivot extends SubsystemBase {
     /*
     public Command calibrateZeroIn() {
         return run(() -> {
-            motor_id_35.setControl(calibrationRequestIn);
+            IntakePivotMotor.setControl(calibrationRequestIn);
         })
         .until(isHardStop)
         .andThen(
             manualDrive(() -> 0.0).withTimeout(0.25)
                 .finallyDo(() -> {
-                    motor_id_35.setPosition(Rotations.of(0));
+                    IntakePivotMotor.setPosition(Rotations.of(0));
                 })
         );
     }
@@ -240,21 +252,21 @@ public class IntakePivot extends SubsystemBase {
     public void periodic() {
         /* refresh all status signals */
         BaseStatusSignal.refreshAll(
-            motor_id_35Position,
-            motor_id_35Velocity,
-            motor_id_35TorqueCurrent
+            IntakePivotMotorPosition,
+            IntakePivotMotorVelocity,
+            IntakePivotMotorTorqueCurrent
         ); 
 
-        armAngle = motor_id_35Position.getValue().in(Degrees);
-        motor_id_35Mech2d.setAngle(armAngle);
+        armAngle = IntakePivotMotorPosition.getValue().in(Degrees);
+        IntakePivotMotorMech2d.setAngle(armAngle);
         
         DogLog.log("Arm/Angle", armAngle); // temp debug
         DogLog.log("Arm/target", target);
     }
 
     private void startSimThread() {
-        motor_id_35.getSimState().Orientation = ChassisReference.CounterClockwise_Positive;
-        motor_id_35.getSimState().setMotorType(TalonFXSimState.MotorType.KrakenX44);
+        IntakePivotMotor.getSimState().Orientation = ChassisReference.CounterClockwise_Positive;
+        IntakePivotMotor.getSimState().setMotorType(TalonFXSimState.MotorType.KrakenX60);
 
         lastSimTime = Utils.getCurrentTimeSeconds();
 
@@ -265,21 +277,21 @@ public class IntakePivot extends SubsystemBase {
             final double deltaTime = currentTime - lastSimTime;
             lastSimTime = currentTime;
 
-            final var motor_id_35Sim = motor_id_35.getSimState();
+            final var IntakePivotMotorSim = IntakePivotMotor.getSimState();
 
             /* First set the supply voltage of all the devices */
-            motor_id_35Sim.setSupplyVoltage(RobotController.getBatteryVoltage());
+            IntakePivotMotorSim.setSupplyVoltage(RobotController.getBatteryVoltage());
 
             /* Then calculate the new position and velocity of the simulated elevator */
-            armSim_motor_id_35.setInputVoltage(motor_id_35Sim.getMotorVoltage());
-            armSim_motor_id_35.update(deltaTime);
+            armSim_IntakePivotMotor.setInputVoltage(IntakePivotMotorSim.getMotorVoltage());
+            armSim_IntakePivotMotor.update(deltaTime);
 
             /* Apply the new rotor position and velocity to the motors (before gear ratio) */
-            motor_id_35Sim.setRawRotorPosition(
-                Radians.of((armSim_motor_id_35.getAngleRads()) * kGearRatio)
+            IntakePivotMotorSim.setRawRotorPosition(
+                Radians.of((armSim_IntakePivotMotor.getAngleRads()) * kGearRatio)
             );
-            motor_id_35Sim.setRotorVelocity(
-                RadiansPerSecond.of(armSim_motor_id_35.getVelocityRadPerSec() * kGearRatio)
+            IntakePivotMotorSim.setRotorVelocity(
+                RadiansPerSecond.of(armSim_IntakePivotMotor.getVelocityRadPerSec() * kGearRatio)
             );
         });
         simNotifier.startPeriodic(kSimLoopPeriod);

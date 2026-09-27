@@ -13,6 +13,8 @@ import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.FollowPathCommand;
 
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -57,6 +59,7 @@ public class RobotContainer {
 
         // Warmup PathPlanner to avoid Java pauses
         CommandScheduler.getInstance().schedule(FollowPathCommand.warmupCommand());
+        if (RobotBase.isSimulation()) DriverStation.silenceJoystickConnectionWarning(true);
     }
     
     private void configureBindings() {
@@ -107,7 +110,8 @@ public class RobotContainer {
 
         //EVERYTHING ABOVE IS PREGENERATED, EVERTHING BELOW IS MY CODE WOOO
         //in pressing the A button on the controller, set superstructure state to STATE1
-        //joystick.a().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STATE1)));
+        joystick.leftTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)));
+        joystick.leftBumper().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)));
     }
 
     public Command getAutonomousCommand() {

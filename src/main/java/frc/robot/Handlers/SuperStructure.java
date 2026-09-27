@@ -19,16 +19,17 @@ public class SuperStructure extends SubsystemBase {
     INTAKE,
     JERK,
     POOP,
-    IDLE
+    STOWED
   }
 
   private static SuperStructure instance;
   
   //private final ShooterSubsystem Shooter = new ShooterSubsystem();
   private final IntakeHandler intakeHandler = IntakeHandler.getInstance();
+  private final IntakePivotHandler intakePivotHandler = IntakePivotHandler.getInstance();
 
-  private SuperStructureState desiredState = SuperStructureState.IDLE;
-  private SuperStructureState currentState = SuperStructureState.IDLE;
+  private SuperStructureState desiredState = SuperStructureState.STOWED;
+  private SuperStructureState currentState = SuperStructureState.STOWED;
 
   
 
@@ -56,15 +57,19 @@ public class SuperStructure extends SubsystemBase {
     switch (desiredState) {
         case INTAKE:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.FAST);
+            intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.ENGADGED);
         break;
         case JERK:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.REVFAST);
+            intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.ENGADGED);
         break;
         case POOP:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.REVFAST);
+            intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.ENGADGED);
         break;
-        case IDLE:
+        case STOWED:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.OFF);
+            intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.STOWED);
         break;
     }
     currentState = desiredState;
