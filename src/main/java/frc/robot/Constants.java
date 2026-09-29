@@ -19,8 +19,8 @@ public class Constants {
             public static final double RevFast = -1.0;
 
             public static final int IntakePivotMotorID = 50;
-            public static final Angle PivotLowSetpoint = Degrees.of(90); //based on pivot 
-            public static final Angle PivotHighSetpoint = Degrees.of(90+120); //also starting config
+            public static final Angle PivotLowSetpoint = Degrees.of(0); //based on pivot 
+            public static final Angle PivotHighSetpoint = PivotLowSetpoint.plus(Degrees.of(120)); //also starting config
 
         }
 

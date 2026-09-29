@@ -85,7 +85,7 @@ public class IntakePivotSubsystem extends SubsystemBase {
     private final SingleJointedArmSim armSim_IntakePivotMotor = new SingleJointedArmSim(
         DCMotor.getKrakenX60(1), 
         kGearRatio,
-        SingleJointedArmSim.estimateMOI(kArmLength.in(Meters), 1.8), 
+        SingleJointedArmSim.estimateMOI(kArmLength.in(Meters), 6.7), 
         kArmLength.in(Meters),
         kMinAngle.in(Radians),
         kMaxAngle.in(Radians),
@@ -117,9 +117,9 @@ public class IntakePivotSubsystem extends SubsystemBase {
 
     static {
     // Configure MotionMagic for the leader motors 
-    leaderInitialConfigs.Slot0.kP = 20;  // Tune these values!
+    leaderInitialConfigs.Slot0.kP = 40;  // Tune these values!
     leaderInitialConfigs.Slot0.kI = 0.0;
-    leaderInitialConfigs.Slot0.kD = 0.5;
+    leaderInitialConfigs.Slot0.kD = 0.1;
     leaderInitialConfigs.Slot0.kG = 0.2;
     
     
@@ -142,7 +142,7 @@ public class IntakePivotSubsystem extends SubsystemBase {
             new MechanismLigament2d(
                 "IntakePivot",
                 kArmLength.in(Meters),   // length of the drawn arm
-                kMinAngle.in(Degrees),   // starting angle
+                kMaxAngle.in(Degrees),   // starting angle
                 6,                        // line width
                 new Color8Bit(255, 0, 0) // color
             )
