@@ -39,6 +39,8 @@ public class IntakeHandler extends SubsystemBase implements StateSubsystem {
   public void setDesiredState(State state){
         if (state instanceof IntakeState IntakeState && desiredState != IntakeState) {
         desiredState = IntakeState;
+
+        handleStateTransition();
     }
   }
 
@@ -81,7 +83,6 @@ public class IntakeHandler extends SubsystemBase implements StateSubsystem {
 
   @Override
   public void periodic() {
-    update();
     // This method will be called once per scheduler run
   }
 }

@@ -4,15 +4,16 @@
 
 package frc.robot;
 
-import static edu.wpi.first.units.Units.*;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import static edu.wpi.first.units.Units.RotationsPerSecond;
 
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
-
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.FollowPathCommand;
 
-import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -22,7 +23,6 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
-import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 import frc.robot.Handlers.SuperStructure;
 import frc.robot.Handlers.SuperStructure.SuperStructureState;
 import frc.robot.generated.TunerConstants;
@@ -41,25 +41,45 @@ public class RobotContainer {
     private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
-    private final Telemetry logger = new Telemetry(MaxSpeed);
-
     private final CommandXboxController joystick = new CommandXboxController(0);
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+    private final Telemetry logger = new Telemetry(MaxSpeed);
     public final SuperStructure superStructure = SuperStructure.getInstance(); //creates a new SuperStructure; try to create all handlers in superstructure and each of their subsystems in their handlers, but like sometimes that wont work so its whateva
 
     /* Path follower */
     private final SendableChooser<Command> autoChooser;
 
     public RobotContainer() {
+
+        configurePathPlanner();
+
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
+
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         configureBindings();
+        configurePathPlanner();
 
         // Warmup PathPlanner to avoid Java pauses
         CommandScheduler.getInstance().schedule(FollowPathCommand.warmupCommand());
         if (RobotBase.isSimulation()) DriverStation.silenceJoystickConnectionWarning(true);
+    }
+
+
+    private void configurePathPlanner() {
+
+        NamedCommands.registerCommand("Intake",
+         new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.INTAKE)));
+
+         NamedCommands.registerCommand("Poop",
+         new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.POOP)));
+
+        NamedCommands.registerCommand("Idle",
+         new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.STOWED)));
+
+        NamedCommands.registerCommand("Jerk",
+         new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.JERK)));
     }
     
     private void configureBindings() {
@@ -92,15 +112,8 @@ public class RobotContainer {
             forwardStraight.withVelocityX(0.5).withVelocityY(0))
         );
         joystick.povDown().whileTrue(drivetrain.applyRequest(() ->
-            forwardStraight.withVelocityX(-0.5).withVelocityY(0))
+            forwardStraight  .withVelocityX(-0.5).withVelocityY(0))
         );
-
-        // Run SysId routines when holding back/start and X/Y.
-        // Note that each routine should be run exactly once in a single log.
-        joystick.back().and(joystick.y()).whileTrue(drivetrain.sysIdDynamic(Direction.kForward));
-        joystick.back().and(joystick.x()).whileTrue(drivetrain.sysIdDynamic(Direction.kReverse));
-        joystick.start().and(joystick.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
-        joystick.start().and(joystick.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
         */
 
         // Reset the field-centric heading on left bumper press.

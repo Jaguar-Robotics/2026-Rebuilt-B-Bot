@@ -34,6 +34,8 @@ public class IntakePivotHandler extends SubsystemBase implements StateSubsystem 
   public void setDesiredState(State state){
         if (state instanceof IntakePivotState IntakePivotState && desiredState != IntakePivotState) {
         desiredState = IntakePivotState;
+
+        handleStateTransition();
     }
   }
 
@@ -63,7 +65,6 @@ public class IntakePivotHandler extends SubsystemBase implements StateSubsystem 
 
   @Override
   public void periodic() {
-    update();
     // This method will be called once per scheduler run
   }
 }
