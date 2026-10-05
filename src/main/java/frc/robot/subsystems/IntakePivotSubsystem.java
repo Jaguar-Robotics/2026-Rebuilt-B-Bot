@@ -38,7 +38,11 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.util.Color8Bit;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Translation3d;
 import frc.robot.Constants;
+import frc.robot.Visualizer;
 public class IntakePivotSubsystem extends SubsystemBase {
     /** Position setpoints for the elevator. */
 
@@ -130,6 +134,12 @@ public class IntakePivotSubsystem extends SubsystemBase {
     }
 
     public IntakePivotSubsystem() {
+
+        DogLog.tunable("IntakePivot3d/PivotX", vizPivotX, v -> vizPivotX = v);
+        DogLog.tunable("IntakePivot3d/PivotZ", vizPivotZ, v -> vizPivotZ = v);
+        DogLog.tunable("IntakePivot3d/CadAngleDeg", vizCadAngleDeg, v -> vizCadAngleDeg = v);
+        DogLog.tunable("IntakePivot3d/Direction", vizDirection, v -> vizDirection = v);
+        DogLog.tunable("IntakePivot3d/HopperTravel", vizHopperTravel, v -> vizHopperTravel = v);
 
         for (int i = 0; i < kNumConfigAttempts; ++i) {
             var status = IntakePivotMotor.getConfigurator().apply(IntakePivotMotorConfigs);
@@ -248,6 +258,14 @@ public class IntakePivotSubsystem extends SubsystemBase {
     
     private double armAngle = 0.0;
 
+    // TODO temporary: live-tunable 3D visualization values (edit in the sim GUI's NetworkTables window under
+    // Robot/Tunable, or any NT editor), then copy the final numbers into IntakeConstants and delete these.
+    private double vizPivotX = Constants.IntakeConstants.PivotXMeters;
+    private double vizPivotZ = Constants.IntakeConstants.PivotZMeters;
+    private double vizCadAngleDeg = Constants.IntakeConstants.CadPoseAngle.in(Degrees);
+    private double vizDirection = -1.0;
+    private double vizHopperTravel = Constants.IntakeConstants.HopperSlideTravelMeters;
+
     @Override
     public void periodic() {
         /* refresh all status signals */
@@ -262,6 +280,31 @@ public class IntakePivotSubsystem extends SubsystemBase {
         
         DogLog.log("Arm/Angle", armAngle); // temp debug
         DogLog.log("Arm/target", target);
+
+        Visualizer.setIntake(getIntakePose(IntakePivotMotorPosition.getValue(), vizPivotX, vizPivotZ, Degrees.of(vizCadAngleDeg), vizDirection));
+        Visualizer.setHopperSlide(getHopperSlidePose(IntakePivotMotorPosition.getValue(), vizHopperTravel));
+    }
+
+    /**
+     * Pose of the intake for AdvantageScope: rotated about (pivotX, pivotZ) by (angle - cadAngle) * direction, with the
+     * pivot point held fixed. direction = -1 swings the intake up and back as the angle increases (negative pitch).
+     */
+    static Pose3d getIntakePose(Angle pivotAngle, double pivotX, double pivotZ, Angle cadAngle, double direction) {
+        double rotatedRad = direction * pivotAngle.minus(cadAngle).in(Radians);
+        Translation3d pivot = new Translation3d(pivotX, Constants.IntakeConstants.PivotYMeters, pivotZ);
+        Rotation3d rotation = new Rotation3d(0, rotatedRad, 0);
+        return new Pose3d(pivot.minus(pivot.rotateBy(rotation)), rotation);
+    }
+
+    /**
+     * The slidy hopper is linked to the intake: fully out (the CAD pose) with the intake deployed, retracted straight back
+     * by travelMeters with the intake stowed, following the pivot angle in between. Visualization only.
+     */
+    static Pose3d getHopperSlidePose(Angle pivotAngle, double travelMeters) {
+        double low = Constants.IntakeConstants.PivotLowSetpoint.in(Radians);
+        double high = Constants.IntakeConstants.PivotHighSetpoint.in(Radians);
+        double fraction = edu.wpi.first.math.MathUtil.clamp((pivotAngle.in(Radians) - low) / (high - low), 0.0, 1.0);
+        return new Pose3d(new Translation3d(-travelMeters * fraction, 0.0, 0.0), new Rotation3d());
     }
 
     private void startSimThread() {

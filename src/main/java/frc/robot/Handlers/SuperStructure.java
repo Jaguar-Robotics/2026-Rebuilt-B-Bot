@@ -1,6 +1,7 @@
 package frc.robot.Handlers;
 
 import static edu.wpi.first.units.Units.Degrees;
+import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -27,6 +28,7 @@ public class SuperStructure extends SubsystemBase {
   //private final ShooterSubsystem Shooter = new ShooterSubsystem();
   private final IntakeHandler intakeHandler = IntakeHandler.getInstance();
   private final IntakePivotHandler intakePivotHandler = IntakePivotHandler.getInstance();
+  private final FourBarHandler fourBarHandler = FourBarHandler.getInstance();
 
   private SuperStructureState desiredState = SuperStructureState.STOWED;
   private SuperStructureState currentState = SuperStructureState.STOWED;
@@ -58,6 +60,7 @@ public class SuperStructure extends SubsystemBase {
         case INTAKE:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.FAST);
             intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.ENGADGED);
+            fourBarHandler.setDesiredState(FourBarHandler.FourBarState.STOWED); // floor stays stowed while intaking
         break;
         case JERK:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.REVFAST);
@@ -66,17 +69,20 @@ public class SuperStructure extends SubsystemBase {
         case POOP:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.REVFAST);
             intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.ENGADGED);
+            fourBarHandler.setDesiredState(FourBarHandler.FourBarState.INTAKE); // raise the floor so balls roll to the intake
         break;
         case STOWED:
             intakeHandler.setDesiredState(IntakeHandler.IntakeState.OFF);
             intakePivotHandler.setDesiredState(IntakePivotHandler.IntakePivotState.STOWED);
+            fourBarHandler.setDesiredState(FourBarHandler.FourBarState.STOWED);
         break;
     }
     currentState = desiredState;
   }
 
   @Override
-  public void periodic() {    
+  public void periodic() {
+    DogLog.log("SuperStructure/DesiredState", desiredState);
   }
 
   public SuperStructureState getCurrentState() {

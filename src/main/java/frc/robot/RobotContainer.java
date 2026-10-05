@@ -14,6 +14,7 @@ import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.FollowPathCommand;
 
+import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -23,6 +24,7 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
+import frc.robot.Handlers.FourBarHandler;
 import frc.robot.Handlers.SuperStructure;
 import frc.robot.Handlers.SuperStructure.SuperStructureState;
 import frc.robot.generated.TunerConstants;
@@ -41,11 +43,13 @@ public class RobotContainer {
     private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
-    private final CommandXboxController joystick = new CommandXboxController(0);
+    private final SimAwareXboxController joystick = new SimAwareXboxController(0); // normal Xbox controller on the robot; remaps axes in sim
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
     private final Telemetry logger = new Telemetry(MaxSpeed);
     public final SuperStructure superStructure = SuperStructure.getInstance(); //creates a new SuperStructure; try to create all handlers in superstructure and each of their subsystems in their handlers, but like sometimes that wont work so its whateva
+
+    public final FourBarHandler fourBarHandler = FourBarHandler.getInstance();
 
     /* Path follower */
     private final SendableChooser<Command> autoChooser;
@@ -123,8 +127,40 @@ public class RobotContainer {
 
         //EVERYTHING ABOVE IS PREGENERATED, EVERTHING BELOW IS MY CODE WOOO
         //in pressing the A button on the controller, set superstructure state to STATE1
+        // Hold left trigger: intake. Hold right trigger: outtake. Release both: stow.
+        // (Left bumper no longer stows; it only re-seeds the field-centric heading above.)
         joystick.leftTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)));
-        joystick.leftBumper().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)));
+        joystick.rightTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.POOP)));
+        joystick.leftTrigger().onFalse(new InstantCommand(this::stowOrKeepHeldState));
+        joystick.rightTrigger().onFalse(new InstantCommand(this::stowOrKeepHeldState));
+
+        // 4-bar (temporary test bindings; INTAKE/STOWED are driven by the SuperStructure states above)
+        joystick.back().onTrue(fourBarHandler.rehome());
+        SmartDashboard.putData("FourBar Intake", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.INTAKE)).ignoringDisable(true));
+        SmartDashboard.putData("FourBar Stow", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.STOWED)).ignoringDisable(true));
+        SmartDashboard.putData("FourBar Rehome", fourBarHandler.rehome());
+        // Same as left trigger / left bumper, for testing without a controller
+        SmartDashboard.putData("Intake Deploy", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)).ignoringDisable(true));
+        SmartDashboard.putData("Intake Stow", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)).ignoringDisable(true));
+    }
+
+    /** Logs the controller inputs that drive the intake bindings, to debug mapping problems. Call every loop. */
+    public void logInputs() {
+        DogLog.log("Controller/LeftTrigger", joystick.getLeftTriggerAxis());
+        DogLog.log("Controller/RightTrigger", joystick.getRightTriggerAxis());
+        DogLog.log("Controller/LeftTriggerPressed", joystick.leftTrigger().getAsBoolean());
+        DogLog.log("Controller/RightTriggerPressed", joystick.rightTrigger().getAsBoolean());
+    }
+
+    /** Called when a trigger is released: if the other trigger is still held, go to its state, otherwise stow. */
+    private void stowOrKeepHeldState() {
+        if (joystick.leftTrigger().getAsBoolean()) {
+            superStructure.setDesiredState(SuperStructureState.INTAKE);
+        } else if (joystick.rightTrigger().getAsBoolean()) {
+            superStructure.setDesiredState(SuperStructureState.POOP);
+        } else {
+            superStructure.setDesiredState(SuperStructureState.STOWED);
+        }
     }
 
     public Command getAutonomousCommand() {
