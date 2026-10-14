@@ -1,0 +1,96 @@
+{
+  "version": "2025.0",
+  "waypoints": [
+    {
+      "anchor": {
+        "x": 3.578311011904762,
+        "y": 5.581495535714287
+      },
+      "prevControl": null,
+      "nextControl": {
+        "x": 4.57015625,
+        "y": 5.594546130952383
+      },
+      "isLocked": false,
+      "linkedName": "LeftBumpGoingMid"
+    },
+    {
+      "anchor": {
+        "x": 5.91436755952381,
+        "y": 5.581495535714287
+      },
+      "prevControl": {
+        "x": 5.187126140528713,
+        "y": 5.581495535714287
+      },
+      "nextControl": {
+        "x": 6.424476887227058,
+        "y": 5.581495535714287
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 6.501644345238095,
+        "y": 7.402053571428571
+      },
+      "prevControl": {
+        "x": 5.501644345238095,
+        "y": 7.402053571428571
+      },
+      "nextControl": null,
+      "isLocked": false,
+      "linkedName": "StallMidDepot"
+    }
+  ],
+  "rotationTargets": [],
+  "constraintZones": [
+    {
+      "name": "slow ahh waiti",
+      "minWaypointRelativePos": 1.164383561643837,
+      "maxWaypointRelativePos": 1.7068493150684954,
+      "constraints": {
+        "maxVelocity": 1.0,
+        "maxAcceleration": 7.0,
+        "maxAngularVelocity": 540.0,
+        "maxAngularAcceleration": 720.0,
+        "nominalVoltage": 12.0,
+        "unlimited": false
+      }
+    }
+  ],
+  "pointTowardsZones": [],
+  "eventMarkers": [
+    {
+      "name": "Intake",
+      "waypointRelativePos": 1.0547945205479445,
+      "endWaypointRelativePos": null,
+      "command": {
+        "type": "named",
+        "data": {
+          "name": "Intake"
+        }
+      }
+    }
+  ],
+  "globalConstraints": {
+    "maxVelocity": 3.5,
+    "maxAcceleration": 7.0,
+    "maxAngularVelocity": 540.0,
+    "maxAngularAcceleration": 720.0,
+    "nominalVoltage": 12.0,
+    "unlimited": false
+  },
+  "goalEndState": {
+    "velocity": 0,
+    "rotation": 180.0
+  },
+  "reversed": false,
+  "folder": null,
+  "idealStartingState": {
+    "velocity": 0,
+    "rotation": 180.0
+  },
+  "useDefaultConstraints": true
+}
