@@ -185,3 +185,7 @@ compile_commands.json
 
 # Eclipse generated file for annotation processors
 .factorypath
+
+# written by the "PrintTunedConstants" button in Elastic
+tuned-constants.txt
+networktables.json.bck

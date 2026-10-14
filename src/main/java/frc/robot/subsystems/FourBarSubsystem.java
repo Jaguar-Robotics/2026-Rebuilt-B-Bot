@@ -9,6 +9,10 @@ import static edu.wpi.first.units.Units.RotationsPerSecond;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.Utils;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
+import com.ctre.phoenix6.configs.SoftwareLimitSwitchConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
@@ -32,6 +36,7 @@ import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
@@ -40,17 +45,96 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.FourBarConstants;
 import frc.robot.Visualizer;
+import frc.robot.tuning.PerfMonitor;
+import frc.robot.tuning.GravityEstimator;
+import frc.robot.tuning.MoveMetrics;
+import frc.robot.tuning.TunableNumber;
+import frc.robot.tuning.Tunables;
+import frc.robot.tuning.TuningMode;
+import frc.robot.tuning.TuningTelemetry;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Parallel 4-bar linkage driven by two Krakens (leader + opposed follower) using the built-in encoder.
- * Angles are mechanism rotations of the driven link, 0 = horizontal. All tunables live in
- * {@link FourBarConstants}.
+ * 4-bar linkage (the hopper floor is its coupler) driven by two Krakens (leader + opposed follower) using the built-in
+ * encoder. Angles are mechanism rotations of the driven link, 0 = horizontal. The starting values live in
+ * {@link FourBarConstants}; everything tunable is also live under /Tuning/FourBar in NetworkTables (edit it in Elastic).
  */
 public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
     private static final int kNumConfigAttempts = 5;
 
-    private static final double kSoftLimitForwardRot = FourBarConstants.UpStopRot - FourBarConstants.SoftLimitMarginRot;
-    private static final double kSoftLimitReverseRot = FourBarConstants.DownStopRot + FourBarConstants.SoftLimitMarginRot;
+    // ---------------------------------------------------------------- live-tunable values (/Tuning/FourBar/...)
+    private final List<Object> tunables = new ArrayList<>();
+    private <T> T track(T t) {
+        tunables.add(t);
+        return t;
+    }
+
+    private static final double kUp = FourBarConstants.UpStopRot;
+    private static final double kDown = FourBarConstants.DownStopRot;
+
+    // gains
+    private final TunableNumber kP = track(Tunables.number("FourBar/Gains/kP", FourBarConstants.kP, 0, 5000, "FourBarConstants.kP", v -> applyGains()));
+    private final TunableNumber kI = track(Tunables.number("FourBar/Gains/kI", FourBarConstants.kI, 0, 500, "FourBarConstants.kI", v -> applyGains()));
+    private final TunableNumber kD = track(Tunables.number("FourBar/Gains/kD", FourBarConstants.kD, 0, 500, "FourBarConstants.kD", v -> applyGains()));
+    private final TunableNumber kS = track(Tunables.number("FourBar/Gains/kS", FourBarConstants.kS, 0, 3, "FourBarConstants.kS", v -> applyGains()));
+    private final TunableNumber kV = track(Tunables.number("FourBar/Gains/kV", FourBarConstants.kV, 0, 60, "FourBarConstants.kV", v -> applyGains()));
+    private final TunableNumber kA = track(Tunables.number("FourBar/Gains/kA", FourBarConstants.kA, 0, 20, "FourBarConstants.kA", v -> applyGains()));
+    private final TunableNumber kG = track(Tunables.number("FourBar/Gains/kG", FourBarConstants.kG, 0, 6, "FourBarConstants.kG", v -> applyGains()));
+    // Motion Magic profile
+    private final TunableNumber cruiseVelocity = track(Tunables.number("FourBar/Motion/CruiseVelocityRotPerSec",
+        FourBarConstants.CruiseVelocityRotPerSec, 0.02, 0.6, "FourBarConstants.CruiseVelocityRotPerSec", v -> applyMotionMagic()));
+    private final TunableNumber acceleration = track(Tunables.number("FourBar/Motion/AccelerationRotPerSecSq",
+        FourBarConstants.AccelerationRotPerSecSq, 0.1, 20, "FourBarConstants.AccelerationRotPerSecSq", v -> applyMotionMagic()));
+    private final TunableNumber jerk = track(Tunables.number("FourBar/Motion/JerkRotPerSecCubed",
+        FourBarConstants.JerkRotPerSecCubed, 0, 500, "FourBarConstants.JerkRotPerSecCubed", v -> applyMotionMagic()));
+    // setpoints (the floor is flat except while outtaking)
+    private final TunableNumber flatRot = track(Tunables.number("FourBar/Setpoints/FlatRot",
+        FourBarConstants.FlatRot, kDown + 0.0005, kUp - 0.0005, "FourBarConstants.FlatRot"));
+    private final TunableNumber raisedRot = track(Tunables.number("FourBar/Setpoints/RaisedRot",
+        FourBarConstants.RaisedRot, kDown + 0.0005, kUp - 0.0005, "FourBarConstants.RaisedRot"));
+    // "at setpoint" tolerances
+    private final TunableNumber positionTolerance = track(Tunables.number("FourBar/Tolerance/PositionRot",
+        FourBarConstants.PositionToleranceRot, 0.0003, 0.02, "FourBarConstants.PositionToleranceRot"));
+    private final TunableNumber velocityTolerance = track(Tunables.number("FourBar/Tolerance/VelocityRotPerSec",
+        FourBarConstants.VelocityToleranceRotPerSec, 0.002, 0.2, "FourBarConstants.VelocityToleranceRotPerSec"));
+    // limits
+    private final TunableNumber statorCurrentLimit = track(Tunables.number("FourBar/Limits/StatorCurrentAmps",
+        FourBarConstants.StatorCurrentLimitAmps, 5, 80, "FourBarConstants.StatorCurrentLimitAmps", v -> applyLimits()));
+    private final TunableNumber softLimitMargin = track(Tunables.number("FourBar/Limits/SoftLimitMarginRot",
+        FourBarConstants.SoftLimitMarginRot, 0.0005, 0.03, "FourBarConstants.SoftLimitMarginRot", v -> applyLimits()));
+    // re-home
+    private final TunableNumber homingVolts = track(Tunables.number("FourBar/Homing/Volts",
+        FourBarConstants.HomingVolts, 0.2, 4, "FourBarConstants.HomingVolts"));
+    private final TunableNumber homingStallCurrent = track(Tunables.number("FourBar/Homing/StallCurrentAmps",
+        FourBarConstants.HomingStallCurrentAmps, 5, 60, "FourBarConstants.HomingStallCurrentAmps"));
+    private final TunableNumber homingStallVelocity = track(Tunables.number("FourBar/Homing/StallVelocityRotPerSec",
+        FourBarConstants.HomingStallVelocityRotPerSec, 0.002, 0.1, "FourBarConstants.HomingStallVelocityRotPerSec"));
+    private final TunableNumber homingDebounce = track(Tunables.number("FourBar/Homing/StallDebounceSeconds",
+        FourBarConstants.HomingStallDebounceSeconds, 0.02, 1, "FourBarConstants.HomingStallDebounceSeconds"));
+    private final TunableNumber homingTimeout = track(Tunables.number("FourBar/Homing/TimeoutSeconds",
+        FourBarConstants.HomingTimeoutSeconds, 1, 15, "FourBarConstants.HomingTimeoutSeconds"));
+    // 3D linkage geometry (visualization only)
+    private final TunableNumber floorBackX = track(Tunables.number("FourBar/3D/FloorBackPivotX", FourBarConstants.FloorBackPivotX, -1, 1, "FourBarConstants.FloorBackPivotX"));
+    private final TunableNumber floorBackZ = track(Tunables.number("FourBar/3D/FloorBackPivotZ", FourBarConstants.FloorBackPivotZ, 0, 1, "FourBarConstants.FloorBackPivotZ"));
+    private final TunableNumber floorFrontX = track(Tunables.number("FourBar/3D/FloorFrontPivotX", FourBarConstants.FloorFrontPivotX, -1, 1, "FourBarConstants.FloorFrontPivotX"));
+    private final TunableNumber floorFrontZ = track(Tunables.number("FourBar/3D/FloorFrontPivotZ", FourBarConstants.FloorFrontPivotZ, 0, 1, "FourBarConstants.FloorFrontPivotZ"));
+    private final TunableNumber shortLink = track(Tunables.number("FourBar/3D/ShortLinkLengthMeters", FourBarConstants.ShortLinkLengthMeters, 0.01, 0.3, "FourBarConstants.ShortLinkLengthMeters"));
+    private final TunableNumber groundDX = track(Tunables.number("FourBar/3D/ShortLinkGroundDX", FourBarConstants.ShortLinkGroundDX, -0.5, 0.5, "FourBarConstants.ShortLinkGroundDX"));
+    private final TunableNumber groundDZ = track(Tunables.number("FourBar/3D/ShortLinkGroundDZ", FourBarConstants.ShortLinkGroundDZ, -0.5, 0.5, "FourBarConstants.ShortLinkGroundDZ"));
+
+    private final Runnable reapplyForSafeMode = () -> {
+        applyMotionMagic();
+        applyLimits();
+    };
+
+    private double softLimitForwardRot() {
+        return kUp - softLimitMargin.get();
+    }
+
+    private double softLimitReverseRot() {
+        return kDown + softLimitMargin.get();
+    }
 
     private final TalonFX leader = new TalonFX(FourBarConstants.LeaderID, FourBarConstants.CanBus);
     private final TalonFX follower = new TalonFX(FourBarConstants.FollowerID, FourBarConstants.CanBus);
@@ -62,20 +146,30 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
     private final StatusSignal<Current> followerStatorCurrent = follower.getStatorCurrent(false);
     private final StatusSignal<Current> leaderSupplyCurrent = leader.getSupplyCurrent(false);
     private final StatusSignal<Current> followerSupplyCurrent = follower.getSupplyCurrent(false);
+    private final StatusSignal<Voltage> leaderMotorVoltage = leader.getMotorVoltage(false);
 
     /* control requests */
     private final MotionMagicVoltage motionMagic = new MotionMagicVoltage(0).withEnableFOC(false);
     private final VoltageOut homingRequest = new VoltageOut(0).withEnableFOC(false).withIgnoreSoftwareLimits(true);
     private final NeutralOut neutral = new NeutralOut();
 
-    private double targetRot = FourBarConstants.StowRot;
+    private double targetRot = FourBarConstants.FlatRot;
     private Debouncer stallDebouncer = new Debouncer(FourBarConstants.HomingStallDebounceSeconds);
+    private boolean homing = false;
+    private double lastPosedTarget = Double.NaN;
+
+    // tuning aids: per-move measurements and the gravity feedforward the mechanism actually needs
+    private final MoveMetrics moveMetrics = new MoveMetrics();
+    private final GravityEstimator gravityEstimator = new GravityEstimator(0.5, 2.0);
+    private double lastPeriodicSeconds = Timer.getFPGATimestamp();
+    private int movesMeasured = 0;
 
     /* simulation */
     private static final double kSimLoopPeriod = 0.002; // 2 ms
+    private static final double kMaxSimStepSeconds = 0.01;
     private SingleJointedArmSim armSim = buildArmSim(FourBarConstants.MovingMassEmptyKg,
-        Rotations.of(FourBarConstants.UpStopRot).in(Radians), 0.0);
-    private static final double kSimBootAngleRad = Rotations.of(FourBarConstants.UpStopRot).in(Radians);
+        Rotations.of(FourBarConstants.DownStopRot).in(Radians), 0.0);
+    private static final double kSimBootAngleRad = Rotations.of(FourBarConstants.DownStopRot).in(Radians);
     private Notifier simNotifier = null;
     private double lastSimTime = 0.0;
 
@@ -85,39 +179,25 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         leaderConfigs.MotorOutput.Inverted = FourBarConstants.LeaderInverted
             ? InvertedValue.Clockwise_Positive : InvertedValue.CounterClockwise_Positive;
         leaderConfigs.Feedback.SensorToMechanismRatio = FourBarConstants.GearReduction;
-        leaderConfigs.CurrentLimits.StatorCurrentLimit = FourBarConstants.StatorCurrentLimitAmps;
-        leaderConfigs.CurrentLimits.StatorCurrentLimitEnable = true;
-        leaderConfigs.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
-        leaderConfigs.SoftwareLimitSwitch.ForwardSoftLimitThreshold = kSoftLimitForwardRot;
-        leaderConfigs.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
-        leaderConfigs.SoftwareLimitSwitch.ReverseSoftLimitThreshold = kSoftLimitReverseRot;
         leaderConfigs.ClosedLoopGeneral.ContinuousWrap = false;
-
-        leaderConfigs.Slot0.GravityType = GravityTypeValue.Arm_Cosine;
-        leaderConfigs.Slot0.kP = FourBarConstants.kP;
-        leaderConfigs.Slot0.kI = FourBarConstants.kI;
-        leaderConfigs.Slot0.kD = FourBarConstants.kD;
-        leaderConfigs.Slot0.kS = FourBarConstants.kS;
-        leaderConfigs.Slot0.kV = FourBarConstants.kV;
-        leaderConfigs.Slot0.kA = FourBarConstants.kA;
-        leaderConfigs.Slot0.kG = FourBarConstants.kG;
-        leaderConfigs.MotionMagic.MotionMagicCruiseVelocity = FourBarConstants.CruiseVelocityRotPerSec;
-        leaderConfigs.MotionMagic.MotionMagicAcceleration = FourBarConstants.AccelerationRotPerSecSq;
-        leaderConfigs.MotionMagic.MotionMagicJerk = FourBarConstants.JerkRotPerSecCubed;
+        leaderConfigs.CurrentLimits = currentLimits();
+        leaderConfigs.SoftwareLimitSwitch = softLimits();
+        leaderConfigs.Slot0 = slot0();
+        leaderConfigs.MotionMagic = motionMagicConfigs();
 
         // The follower only needs the output-side configs; its direction comes from the Opposed alignment.
         TalonFXConfiguration followerConfigs = new TalonFXConfiguration();
         followerConfigs.MotorOutput.NeutralMode = NeutralModeValue.Brake;
-        followerConfigs.CurrentLimits.StatorCurrentLimit = FourBarConstants.StatorCurrentLimitAmps;
-        followerConfigs.CurrentLimits.StatorCurrentLimitEnable = true;
+        followerConfigs.CurrentLimits = currentLimits();
 
         applyConfigs(leader, leaderConfigs);
         applyConfigs(follower, followerConfigs);
         follower.setControl(new Follower(FourBarConstants.LeaderID, MotorAlignmentValue.Opposed));
 
-        BaseStatusSignal.setUpdateFrequencyForAll(100,
-            position, velocity, leaderStatorCurrent, followerStatorCurrent,
-            leaderSupplyCurrent, followerSupplyCurrent);
+        // The control loop and the gravity estimate need these fast; the rest are only logged, so they use less CAN bandwidth.
+        BaseStatusSignal.setUpdateFrequencyForAll(100, position, velocity, leaderStatorCurrent, leaderMotorVoltage);
+        BaseStatusSignal.setUpdateFrequencyForAll(50, followerStatorCurrent);
+        BaseStatusSignal.setUpdateFrequencyForAll(20, leaderSupplyCurrent, followerSupplyCurrent);
 
         // Start the sim first so the raw rotor value is in a known state before it is offset by the seed.
         if (Utils.isSimulation()) {
@@ -128,6 +208,70 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         // The robot always boots against the hard stop.
         seedPosition();
         refreshSignals();
+
+        TuningMode.onChange(reapplyForSafeMode);
+        track(Tunables.action("FourBar/Actions/ApplySuggestedKG", this::applySuggestedKg));
+        track(Tunables.action("FourBar/Actions/ResetGravityEstimate", gravityEstimator::reset));
+    }
+
+    // ---------------------------------------------------------------- applying tuned values to the motors
+
+    private Slot0Configs slot0() {
+        Slot0Configs s = new Slot0Configs();
+        s.GravityType = GravityTypeValue.Arm_Cosine;
+        s.kP = kP.get();
+        s.kI = kI.get();
+        s.kD = kD.get();
+        s.kS = kS.get();
+        s.kV = kV.get();
+        s.kA = kA.get();
+        s.kG = kG.get();
+        return s;
+    }
+
+    private MotionMagicConfigs motionMagicConfigs() {
+        MotionMagicConfigs m = new MotionMagicConfigs();
+        m.MotionMagicCruiseVelocity = TuningMode.scale(cruiseVelocity.get());
+        m.MotionMagicAcceleration = TuningMode.scale(acceleration.get());
+        m.MotionMagicJerk = TuningMode.scale(jerk.get());
+        return m;
+    }
+
+    private CurrentLimitsConfigs currentLimits() {
+        CurrentLimitsConfigs c = new CurrentLimitsConfigs();
+        c.StatorCurrentLimit = TuningMode.limitAmps(statorCurrentLimit.get());
+        c.StatorCurrentLimitEnable = true;
+        return c;
+    }
+
+    private SoftwareLimitSwitchConfigs softLimits() {
+        SoftwareLimitSwitchConfigs c = new SoftwareLimitSwitchConfigs();
+        c.ForwardSoftLimitEnable = true;
+        c.ForwardSoftLimitThreshold = softLimitForwardRot();
+        c.ReverseSoftLimitEnable = true;
+        c.ReverseSoftLimitThreshold = softLimitReverseRot();
+        return c;
+    }
+
+    private void applyGains() {
+        leader.getConfigurator().apply(slot0(), 0.05);
+    }
+
+    private void applyMotionMagic() {
+        leader.getConfigurator().apply(motionMagicConfigs(), 0.05);
+    }
+
+    private void applyLimits() {
+        leader.getConfigurator().apply(currentLimits(), 0.05);
+        follower.getConfigurator().apply(currentLimits(), 0.05);
+        leader.getConfigurator().apply(softLimits(), 0.05);
+    }
+
+    /** Sets the kG tunable to the value the gravity estimator measured (the "ApplySuggestedKG" button in Elastic). */
+    private void applySuggestedKg() {
+        if (gravityEstimator.hasEstimate()) {
+            kG.set(Math.max(0.0, gravityEstimator.getKg()));
+        }
     }
 
     private static void applyConfigs(TalonFX motor, TalonFXConfiguration configs) {
@@ -138,13 +282,13 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
     }
 
     private void seedPosition() {
-        leader.setPosition(Rotations.of(FourBarConstants.UpStopRot), 0.25);
+        leader.setPosition(Rotations.of(FourBarConstants.DownStopRot), 0.25); // boots against the down stop (floor flat)
     }
 
     private void refreshSignals() {
         BaseStatusSignal.refreshAll(
             position, velocity, leaderStatorCurrent, followerStatorCurrent,
-            leaderSupplyCurrent, followerSupplyCurrent);
+            leaderSupplyCurrent, followerSupplyCurrent, leaderMotorVoltage);
     }
 
     // ---------------------------------------------------------------- getters
@@ -161,6 +305,11 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         return leaderStatorCurrent.getValue();
     }
 
+    /** Average stator current magnitude of the two motors; at a standstill this is the holding current against gravity. */
+    public double getHoldCurrentAmps() {
+        return (Math.abs(leaderStatorCurrent.getValue().in(Amps)) + Math.abs(followerStatorCurrent.getValue().in(Amps))) / 2.0;
+    }
+
     public Current getFollowerStatorCurrent() {
         return followerStatorCurrent.getValue();
     }
@@ -169,17 +318,32 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         return Rotations.of(targetRot);
     }
 
+    /** Where the floor is flat (tunable). */
+    public double getFlatRot() {
+        return flatRot.get();
+    }
+
+    /** Where the floor is raised for outtake (tunable). */
+    public double getRaisedRot() {
+        return raisedRot.get();
+    }
+
+    /** A target clamped inside the soft limits. */
+    public double clampToLimits(double rot) {
+        return MathUtil.clamp(rot, softLimitReverseRot(), softLimitForwardRot());
+    }
+
     /** @return true when the link is within tolerance of the commanded target and basically stopped. */
     public boolean atSetpoint() {
-        return Math.abs(position.getValue().in(Rotations) - targetRot) < FourBarConstants.PositionToleranceRot
-            && Math.abs(velocity.getValue().in(RotationsPerSecond)) < FourBarConstants.VelocityToleranceRotPerSec;
+        return Math.abs(position.getValue().in(Rotations) - targetRot) < positionTolerance.get()
+            && Math.abs(velocity.getValue().in(RotationsPerSecond)) < velocityTolerance.get();
     }
 
     // ---------------------------------------------------------------- control
 
     /** Sets the Motion Magic target (clamped to the soft limits). Call once; the TalonFX holds it. */
     public void setTarget(Angle target) {
-        targetRot = MathUtil.clamp(target.in(Rotations), kSoftLimitReverseRot, kSoftLimitForwardRot);
+        targetRot = clampToLimits(target.in(Rotations));
         leader.setControl(motionMagic.withPosition(targetRot));
     }
 
@@ -189,29 +353,31 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
     }
 
     /**
-     * Drives slowly into the stow hard stop, detects the stall (stator current spike + near-zero velocity),
-     * then resets the position to the stowed angle. If no stall is seen before the timeout, or the command
+     * Drives slowly into the down hard stop (floor flat), detects the stall (stator current spike + near-zero velocity),
+     * then resets the position to that stop's angle. If no stall is seen before the timeout, or the command
      * is interrupted, the position is NOT reset and the mechanism holds where it is.
      */
     public Command rehome() {
-        final double volts = Math.copySign(FourBarConstants.HomingVolts,
-            FourBarConstants.UpStopRot - FourBarConstants.DownStopRot);
         final boolean[] stalled = {false};
         return startRun(
                 () -> {
                     stalled[0] = false;
-                    stallDebouncer = new Debouncer(FourBarConstants.HomingStallDebounceSeconds);
+                    homing = true;
+                    stallDebouncer = new Debouncer(homingDebounce.get());
                 },
                 () -> {
+                    // re-home drives into the DOWN stop (floor flat); safe mode drives it slower
+                    double volts = Math.copySign(TuningMode.scale(homingVolts.get()), FourBarConstants.DownStopRot - FourBarConstants.UpStopRot);
                     leader.setControl(homingRequest.withOutput(volts));
                     stalled[0] = stallDebouncer.calculate(isStallSample());
                 })
             .until(() -> stalled[0])
-            .withTimeout(FourBarConstants.HomingTimeoutSeconds)
+            .withTimeout(homingTimeout.get())
             .finallyDo(interrupted -> {
+                homing = false;
                 if (stalled[0]) {
-                    seedPosition(); // the up stop is the zero reference
-                    setTarget(Rotations.of(FourBarConstants.StowRot));
+                    seedPosition(); // the down stop is the zero reference
+                    setTarget(Rotations.of(flatRot.get()));
                 } else {
                     DogLog.logFault("FourBar re-home did not detect the hard stop");
                     setTarget(getPosition()); // hold where we are
@@ -221,14 +387,33 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
     }
 
     private boolean isStallSample() {
-        return Math.abs(leaderStatorCurrent.getValue().in(Amps)) > FourBarConstants.HomingStallCurrentAmps
-            && Math.abs(velocity.getValue().in(RotationsPerSecond)) < FourBarConstants.HomingStallVelocityRotPerSec;
+        return Math.abs(leaderStatorCurrent.getValue().in(Amps)) > homingStallCurrent.get()
+            && Math.abs(velocity.getValue().in(RotationsPerSecond)) < homingStallVelocity.get();
     }
 
     /** Test hook: sends a Motion Magic target WITHOUT clamping, to exercise the firmware soft limits. */
     void setUnclampedTargetForTesting(double rot) {
         targetRot = rot;
         leader.setControl(motionMagic.withPosition(rot));
+    }
+
+    /** Test hooks: read back what the motor itself is configured with, to prove tuned values really reach it. */
+    double readKpFromMotorForTesting() {
+        Slot0Configs c = new Slot0Configs();
+        leader.getConfigurator().refresh(c, 0.5);
+        return c.kP;
+    }
+
+    double readStatorLimitFromMotorForTesting() {
+        CurrentLimitsConfigs c = new CurrentLimitsConfigs();
+        leader.getConfigurator().refresh(c, 0.5);
+        return c.StatorCurrentLimit;
+    }
+
+    double readCruiseVelocityFromMotorForTesting() {
+        MotionMagicConfigs c = new MotionMagicConfigs();
+        leader.getConfigurator().refresh(c, 0.5);
+        return c.MotionMagicCruiseVelocity;
     }
 
     /** Test hook: overwrites the encoder position without moving the sim link (simulates a lost/bad zero). */
@@ -245,34 +430,135 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
 
     @Override
     public void periodic() {
+        long perfStart = PerfMonitor.now();
+        periodicInner();
+        PerfMonitor.lap("Sub.FourBar", perfStart);
+    }
+
+    private void periodicInner() {
         refreshSignals();
 
+        double now = Timer.getFPGATimestamp();
+        double dt = now - lastPeriodicSeconds;
+        lastPeriodicSeconds = now;
+
         double angleRot = position.getValue().in(Rotations);
+        double velRotPerSec = velocity.getValue().in(RotationsPerSecond);
+        double amps = leaderStatorCurrent.getValue().in(Amps);
+        double volts = leaderMotorVoltage.getValue().in(edu.wpi.first.units.Units.Volts);
+
         DogLog.log("FourBar/AngleRot", angleRot);
         DogLog.log("FourBar/TargetRot", targetRot);
         DogLog.log("FourBar/AtSetpoint", atSetpoint());
-        DogLog.log("FourBar/VelocityRotPerSec", velocity.getValue().in(RotationsPerSecond));
-        DogLog.log("FourBar/LeaderStatorCurrentAmps", leaderStatorCurrent.getValue().in(Amps));
+        DogLog.log("FourBar/VelocityRotPerSec", velRotPerSec);
+        DogLog.log("FourBar/LeaderStatorCurrentAmps", amps);
         DogLog.log("FourBar/FollowerStatorCurrentAmps", followerStatorCurrent.getValue().in(Amps));
         DogLog.log("FourBar/LeaderSupplyCurrentAmps", leaderSupplyCurrent.getValue().in(Amps));
         DogLog.log("FourBar/FollowerSupplyCurrentAmps", followerSupplyCurrent.getValue().in(Amps));
 
-        // AdvantageScope: pose of the pivoting floor relative to the robot. Rotation is about the pivot, which is
-        // fixed (see advantagescope/Robot_BBot/config.json: components are zeroed at their CAD placement).
-        Visualizer.setFloor(getFloorPose(angleRot));
-        DogLog.log("FourBar/TargetLinkPose3d", getFloorPose(targetRot));
+        // ---- tuning aids (graph these in Elastic: Live/PositionRot against Live/TargetRot)
+        TuningTelemetry.putLive("FourBar/Live/PositionRot", angleRot);
+        TuningTelemetry.putLive("FourBar/Live/TargetRot", targetRot);
+        TuningTelemetry.putLive("FourBar/Live/ErrorRot", targetRot - angleRot);
+        TuningTelemetry.putLive("FourBar/Live/VelocityRotPerSec", velRotPerSec);
+        TuningTelemetry.putLive("FourBar/Live/MotorVolts", volts);
+        TuningTelemetry.putLive("FourBar/Live/StatorCurrentAmps", amps);
+        TuningTelemetry.putLive("FourBar/Live/AtSetpoint", atSetpoint());
+        TuningTelemetry.putLive("FourBar/Live/SafeMode", TuningMode.isSafe());
+
+        if (!homing) {
+            moveMetrics.update(now, angleRot, targetRot, amps, positionTolerance.get()).ifPresent(this::publishMove);
+            gravityEstimator.update(volts, angleRot, atSetpoint(), dt);
+        }
+        if (gravityEstimator.hasEstimate()) {
+            TuningTelemetry.putLive("FourBar/Suggested/kG", gravityEstimator.getKg());
+            TuningTelemetry.putLive("FourBar/Suggested/kGMinusCurrent", gravityEstimator.getKg() - kG.get());
+        }
+        TuningTelemetry.putLive("FourBar/Suggested/CurrentKG", kG.get());
+
+        // AdvantageScope: pose of the hopper floor relative to the robot (the model is zeroed flat; see
+        // advantagescope/Robot_BBot/config.json).
+        Visualizer.setFloor(getFloorPose(angleRot, geometry()));
+        if (targetRot != lastPosedTarget) { // the target pose only changes when the target does
+            lastPosedTarget = targetRot;
+            DogLog.log("FourBar/TargetLinkPose3d", getFloorPose(targetRot, geometry()));
+        }
+    }
+
+    private void publishMove(MoveMetrics.Result r) {
+        movesMeasured++;
+        TuningTelemetry.put("FourBar/Result/MovesMeasured", movesMeasured);
+        TuningTelemetry.put("FourBar/Result/DistanceRot", r.distance());
+        TuningTelemetry.put("FourBar/Result/SettleSeconds", r.settleSeconds());
+        TuningTelemetry.put("FourBar/Result/OvershootRot", r.overshoot());
+        TuningTelemetry.put("FourBar/Result/SteadyStateErrorRot", r.steadyStateError());
+        TuningTelemetry.put("FourBar/Result/PeakStatorCurrentAmps", r.peakCurrentAmps());
+        TuningTelemetry.put("FourBar/Result/Settled", r.settled());
+        TuningTelemetry.put("FourBar/Result/Advice", MoveMetrics.advise(r, positionTolerance.get(), 1.5));
+    }
+
+    /** The linkage dimensions used to draw the floor, as currently tuned. */
+    record FloorGeometry(double linkLength, double shortLink, double backX, double backZ, double frontX, double frontZ,
+                         double groundDX, double groundDZ, double flatAngleRot) {}
+
+    private FloorGeometry geometry() {
+        return new FloorGeometry(FourBarConstants.LinkLengthMeters, shortLink.get(), floorBackX.get(), floorBackZ.get(),
+            floorFrontX.get(), floorFrontZ.get(), groundDX.get(), groundDZ.get(), FourBarConstants.DownStopRot);
     }
 
     /**
-     * Floor pose for a 4-bar angle: rotated about the pivot by how far the link has moved from the CAD pose angle.
-     * The component model is zeroed at its CAD placement, so the pose translation is P - R*P to keep the pivot fixed.
+     * Floor pose for a link angle, from the 4-bar's kinematics. The floor is the coupler: its back pivot rides the end of the
+     * long (driven) link and its front pivot rides the end of the short link, so it both tilts and moves along an arc.
+     * Everything is in the robot's X (forward) / Z (up) plane. The component model is drawn in the FLAT pose, so the pose
+     * returned is the rigid motion from the flat coupler to the coupler at this link angle.
      */
-    static Pose3d getFloorPose(double angleRot) {
-        double rotatedRad = Rotations.of(angleRot - FourBarConstants.CadPoseAngleRot).in(Radians);
-        Translation3d pivot = new Translation3d(
-            FourBarConstants.PivotXMeters, FourBarConstants.PivotYMeters, FourBarConstants.PivotZMeters);
-        Rotation3d rotation = new Rotation3d(0, -rotatedRad, FourBarConstants.MountYawRadians);
-        return new Pose3d(pivot.minus(pivot.rotateBy(rotation)), rotation);
+    static Pose3d getFloorPose(double linkAngleRot) {
+        return getFloorPose(linkAngleRot, new FloorGeometry(FourBarConstants.LinkLengthMeters,
+            FourBarConstants.ShortLinkLengthMeters, FourBarConstants.FloorBackPivotX, FourBarConstants.FloorBackPivotZ,
+            FourBarConstants.FloorFrontPivotX, FourBarConstants.FloorFrontPivotZ, FourBarConstants.ShortLinkGroundDX,
+            FourBarConstants.ShortLinkGroundDZ, FourBarConstants.DownStopRot));
+    }
+
+    static Pose3d getFloorPose(double linkAngleRot, FloorGeometry g) {
+        double l1 = g.linkLength();
+        double l3 = g.shortLink();
+        double b0x = g.backX(), b0z = g.backZ();
+        double f0x = g.frontX(), f0z = g.frontZ();
+        double coupler = Math.hypot(f0x - b0x, f0z - b0z);
+        // Link angle is measured above the backward horizontal: back pivot = hub + l1 * (-cos a, sin a).
+        double aFlat = Rotations.of(g.flatAngleRot()).in(Radians);
+        double hubX = b0x + l1 * Math.cos(aFlat);
+        double hubZ = b0z - l1 * Math.sin(aFlat);
+        double sx = hubX + g.groundDX();
+        double sz = hubZ + g.groundDZ();
+
+        double a = Rotations.of(linkAngleRot).in(Radians);
+        double bx = hubX - l1 * Math.cos(a);
+        double bz = hubZ + l1 * Math.sin(a);
+
+        // Front pivot: intersection of the circle of radius l3 about the short link's ground pivot with the circle of radius
+        // "coupler" about the back pivot, on the same side as in the flat pose.
+        double dx = bx - sx, dz = bz - sz;
+        double d = Math.max(1e-6, Math.hypot(dx, dz));
+        double along = (l3 * l3 - coupler * coupler + d * d) / (2 * d);
+        double h = Math.sqrt(Math.max(0.0, l3 * l3 - along * along));
+        double px = sx + along * dx / d, pz = sz + along * dz / d;
+        double fx1 = px + h * (-dz / d), fz1 = pz + h * (dx / d);
+        double fx2 = px - h * (-dz / d), fz2 = pz - h * (dx / d);
+        double flatSide = Math.signum((b0x - sx) * (f0z - sz) - (b0z - sz) * (f0x - sx));
+        double side1 = Math.signum(dx * (fz1 - sz) - dz * (fx1 - sx));
+        double fx = side1 == flatSide ? fx1 : fx2;
+        double fz = side1 == flatSide ? fz1 : fz2;
+
+        // Rigid motion of the coupler: tilt change (counter-clockwise, front up = positive) and the translation that puts
+        // the back pivot where it now is.
+        double tilt = Math.atan2(fz - bz, fx - bx);
+        double tilt0 = Math.atan2(f0z - b0z, f0x - b0x);
+        double delta = tilt - tilt0;
+        double rx = b0x * Math.cos(delta) - b0z * Math.sin(delta);
+        double rz = b0x * Math.sin(delta) + b0z * Math.cos(delta);
+        // Pitch about +Y is positive nose-down, so a counter-clockwise (front-up) tilt is a negative pitch.
+        return new Pose3d(new Translation3d(bx - rx, 0.0, bz - rz), new Rotation3d(0, -delta, 0));
     }
 
     // ---------------------------------------------------------------- simulation
@@ -325,7 +611,8 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         lastSimTime = Utils.getCurrentTimeSeconds();
         simNotifier = new Notifier(() -> {
             final double currentTime = Utils.getCurrentTimeSeconds();
-            final double deltaTime = currentTime - lastSimTime;
+            // Cap the step: if this thread is starved (a busy machine) one huge step could throw the mechanism sim off.
+            final double deltaTime = Math.min(currentTime - lastSimTime, kMaxSimStepSeconds);
             lastSimTime = currentTime;
 
             final var leaderSim = leader.getSimState();
@@ -357,6 +644,8 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
             simNotifier.close();
             simNotifier = null;
         }
+        TuningMode.removeListener(reapplyForSafeMode);
+        Tunables.unregister(tunables);
         leader.close();
         follower.close();
         edu.wpi.first.wpilibj2.command.CommandScheduler.getInstance().unregisterSubsystem(this);

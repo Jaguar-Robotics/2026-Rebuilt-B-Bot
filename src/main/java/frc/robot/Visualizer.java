@@ -31,7 +31,12 @@ public final class Visualizer {
         hopperSlide = pose;
     }
 
+    private static final Pose3d[] poses = new Pose3d[3]; // reused every loop instead of allocating a new array
+
     public static void log() {
-        DogLog.log("Visualizer/ComponentPoses", new Pose3d[] {floor, intake, hopperSlide});
+        poses[0] = floor;
+        poses[1] = intake;
+        poses[2] = hopperSlide;
+        DogLog.log("Visualizer/ComponentPoses", poses);
     }
 }

@@ -70,4 +70,43 @@ class SimAwareXboxControllerTest {
         assertFalse(controller.rightTrigger().getAsBoolean()); // exactly at the 0.5 threshold is not a press
         assertEquals(1.0, controller.getRawAxis(2), 1e-6); // standard LT index maps to the sim trigger
     }
+
+    @Test
+    void buttonsAreLookedUpInTheSimButtonTableNotTheRealNumbers() {
+        DriverStationSim.setJoystickButtonCount(0, 27);
+        var rightBumper = controller.rightBumper();
+        var leftBumper = controller.leftBumper();
+        var back = controller.back();
+        // an unrelated raw button (the sim GUI reports 27 on this controller) must not trigger anything
+        DriverStationSim.setJoystickButton(0, 27, true);
+        update();
+        assertFalse(rightBumper.getAsBoolean());
+        assertFalse(leftBumper.getAsBoolean());
+        assertFalse(back.getAsBoolean());
+        DriverStationSim.setJoystickButton(0, 27, false);
+
+        DriverStationSim.setJoystickButton(0, SimAwareXboxController.SIM_BUTTON_RIGHT_BUMPER, true);
+        update();
+        assertTrue(rightBumper.getAsBoolean(), "the right bumper is whatever number the sim table says");
+        assertFalse(leftBumper.getAsBoolean());
+        DriverStationSim.setJoystickButton(0, SimAwareXboxController.SIM_BUTTON_RIGHT_BUMPER, false);
+        DriverStationSim.setJoystickButton(0, SimAwareXboxController.SIM_BUTTON_BACK, true);
+        update();
+        assertTrue(back.getAsBoolean());
+    }
+
+    @Test
+    void theButtonTableMatchesTheMeasuredXboxWirelessControllerOnTheMac() {
+        // Measured by pressing each physical button and reading the raw numbers (see the comment in SimAwareXboxController).
+        assertEquals(1, SimAwareXboxController.SIM_BUTTON_A);
+        assertEquals(2, SimAwareXboxController.SIM_BUTTON_B);
+        assertEquals(4, SimAwareXboxController.SIM_BUTTON_X);
+        assertEquals(5, SimAwareXboxController.SIM_BUTTON_Y);
+        assertEquals(7, SimAwareXboxController.SIM_BUTTON_LEFT_BUMPER);
+        assertEquals(8, SimAwareXboxController.SIM_BUTTON_RIGHT_BUMPER);
+        assertEquals(11, SimAwareXboxController.SIM_BUTTON_BACK);
+        assertEquals(12, SimAwareXboxController.SIM_BUTTON_START);
+        assertEquals(5, SimAwareXboxController.SIM_LEFT_TRIGGER, "left trigger is sim axis 5");
+        assertEquals(4, SimAwareXboxController.SIM_RIGHT_TRIGGER, "right trigger is sim axis 4");
+    }
 }

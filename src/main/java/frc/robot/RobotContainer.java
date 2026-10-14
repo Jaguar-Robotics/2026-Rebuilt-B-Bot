@@ -13,6 +13,13 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.FollowPathCommand;
+import com.pathplanner.lib.path.GoalEndState;
+import com.pathplanner.lib.path.IdealStartingState;
+import com.pathplanner.lib.path.PathConstraints;
+import com.pathplanner.lib.path.PathPlannerPath;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj2.command.Commands;
 
 import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -25,6 +32,11 @@ import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import frc.robot.Handlers.FourBarHandler;
+import frc.robot.Handlers.IntakePivotHandler;
+import frc.robot.tuning.TunableNumber;
+import frc.robot.tuning.Tunables;
+import frc.robot.tuning.TuningTelemetry;
+import java.util.Set;
 import frc.robot.Handlers.SuperStructure;
 import frc.robot.Handlers.SuperStructure.SuperStructureState;
 import frc.robot.generated.TunerConstants;
@@ -51,6 +63,10 @@ public class RobotContainer {
 
     public final FourBarHandler fourBarHandler = FourBarHandler.getInstance();
 
+    /** Fuel on the field, simulation only (null on the real robot). */
+    private final FuelSimulation fuelSimulation = RobotBase.isSimulation()
+        ? new FuelSimulation(drivetrain, superStructure, fourBarHandler) : null;
+
     /* Path follower */
     private final SendableChooser<Command> autoChooser;
 
@@ -64,6 +80,12 @@ public class RobotContainer {
 
         configureBindings();
         configurePathPlanner();
+        configureTuning();
+        if (RobotBase.isSimulation()) {
+            // The real robot gets its pose from an auto or vision; in simulation start somewhere valid on the field.
+            drivetrain.resetPose(new Pose2d(Constants.SimConstants.StartXMeters, Constants.SimConstants.StartYMeters,
+                Rotation2d.fromDegrees(Constants.SimConstants.StartHeadingDegrees)));
+        }
 
         // Warmup PathPlanner to avoid Java pauses
         CommandScheduler.getInstance().schedule(FollowPathCommand.warmupCommand());
@@ -79,8 +101,9 @@ public class RobotContainer {
          NamedCommands.registerCommand("Poop",
          new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.POOP)));
 
+        // "Idle" stops the rollers and lowers the floor but leaves the intake where it is (it would stall pulling in against a full hopper)
         NamedCommands.registerCommand("Idle",
-         new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.STOWED)));
+         new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.IDLE)));
 
         NamedCommands.registerCommand("Jerk",
          new InstantCommand(() -> superStructure.setDesiredState(SuperStructure.SuperStructureState.JERK)));
@@ -127,39 +150,254 @@ public class RobotContainer {
 
         //EVERYTHING ABOVE IS PREGENERATED, EVERTHING BELOW IS MY CODE WOOO
         //in pressing the A button on the controller, set superstructure state to STATE1
-        // Hold left trigger: intake. Hold right trigger: outtake. Release both: stow.
+        // Hold left trigger: intake. Hold right trigger: outtake. Release both: idle (rollers off, floor flat, intake stays where it is).
         // (Left bumper no longer stows; it only re-seeds the field-centric heading above.)
         joystick.leftTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)));
         joystick.rightTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.POOP)));
-        joystick.leftTrigger().onFalse(new InstantCommand(this::stowOrKeepHeldState));
-        joystick.rightTrigger().onFalse(new InstantCommand(this::stowOrKeepHeldState));
+        joystick.leftTrigger().onFalse(new InstantCommand(this::idleOrKeepHeldState));
+        joystick.rightTrigger().onFalse(new InstantCommand(this::idleOrKeepHeldState));
+        // A: stow the intake. Only works when the hopper is empty or nearly empty; otherwise it buzzes the controller and nothing moves.
+        joystick.a().onTrue(stowIntakeButton());
 
-        // 4-bar (temporary test bindings; INTAKE/STOWED are driven by the SuperStructure states above)
+        // Press right bumper once: drive to the outpost, then keep feeding it on its own. Press again to cancel and stow.
+        joystick.rightBumper().toggleOnTrue(outpostFeedCommand());
+
+        // 4-bar (temporary test bindings; the floor normally follows the SuperStructure states above)
         joystick.back().onTrue(fourBarHandler.rehome());
-        SmartDashboard.putData("FourBar Intake", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.INTAKE)).ignoringDisable(true));
-        SmartDashboard.putData("FourBar Stow", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.STOWED)).ignoringDisable(true));
+        SmartDashboard.putData("FourBar Raise", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.RAISED)).ignoringDisable(true));
+        SmartDashboard.putData("FourBar Flat", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.FLAT)).ignoringDisable(true));
         SmartDashboard.putData("FourBar Rehome", fourBarHandler.rehome());
         // Same as left trigger / left bumper, for testing without a controller
         SmartDashboard.putData("Intake Deploy", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)).ignoringDisable(true));
-        SmartDashboard.putData("Intake Stow", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)).ignoringDisable(true));
+        SmartDashboard.putData("Intake Stow (only if hopper nearly empty)", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)).ignoringDisable(true));
+    }
+
+    // live-tunable outpost feeding (/Tuning/Outpost/...): read each time the button is pressed
+    private final TunableNumber outpostX = Tunables.number("Outpost/PoseXMeters", Constants.OutpostConstants.OutpostXMeters, 0, 16.6, "OutpostConstants.OutpostXMeters");
+    private final TunableNumber outpostY = Tunables.number("Outpost/PoseYMeters", Constants.OutpostConstants.OutpostYMeters, 0, 8.2, "OutpostConstants.OutpostYMeters");
+    private final TunableNumber outpostHeading = Tunables.number("Outpost/PoseHeadingDegrees", Constants.OutpostConstants.OutpostHeadingDegrees, -180, 180, "OutpostConstants.OutpostHeadingDegrees");
+    private final TunableNumber outpostApproachDistance = Tunables.number("Outpost/ApproachDistanceMeters", Constants.OutpostConstants.ApproachDistanceMeters, 0.3, 3, "OutpostConstants.ApproachDistanceMeters");
+    private final TunableNumber outpostApproachVel = Tunables.number("Outpost/ApproachVelocityMetersPerSecond", Constants.OutpostConstants.ApproachVelocityMetersPerSecond, 0.2, 3, "OutpostConstants.ApproachVelocityMetersPerSecond");
+    private final TunableNumber outpostApproachAccel = Tunables.number("Outpost/ApproachAccelerationMetersPerSecondSq", Constants.OutpostConstants.ApproachAccelerationMetersPerSecondSq, 0.3, 6, "OutpostConstants.ApproachAccelerationMetersPerSecondSq");
+    private final TunableNumber outpostMaxVel = Tunables.number("Outpost/MaxVelocityMetersPerSecond", Constants.OutpostConstants.MaxVelocityMetersPerSecond, 0.2, 4.5, "OutpostConstants.MaxVelocityMetersPerSecond");
+    private final TunableNumber outpostMaxAccel = Tunables.number("Outpost/MaxAccelerationMetersPerSecondSq", Constants.OutpostConstants.MaxAccelerationMetersPerSecondSq, 0.2, 10, "OutpostConstants.MaxAccelerationMetersPerSecondSq");
+    private final TunableNumber outpostMaxAngVel = Tunables.number("Outpost/MaxAngularVelocityDegreesPerSecond", Constants.OutpostConstants.MaxAngularVelocityDegreesPerSecond, 30, 720, "OutpostConstants.MaxAngularVelocityDegreesPerSecond");
+    private final TunableNumber outpostMaxAngAccel = Tunables.number("Outpost/MaxAngularAccelerationDegreesPerSecondSq", Constants.OutpostConstants.MaxAngularAccelerationDegreesPerSecondSq, 30, 1440, "OutpostConstants.MaxAngularAccelerationDegreesPerSecondSq");
+    private final TunableNumber pulseInterval = Tunables.number("Outpost/PulseIntervalSeconds", Constants.OutpostConstants.PulseIntervalSeconds, 0.2, 30, "OutpostConstants.PulseIntervalSeconds");
+    private final TunableNumber pulseDuration = Tunables.number("Outpost/PulseDurationSeconds", Constants.OutpostConstants.PulseDurationSeconds, 0.05, 5, "OutpostConstants.PulseDurationSeconds");
+    // set the robot's field pose from Elastic (the pose starts at 0,0 until an auto or vision sets it): /Tuning/Pose/...
+    private final TunableNumber setPoseX = Tunables.number("Pose/SetXMeters", Constants.SimConstants.StartXMeters, 0, 16.5, null);
+    private final TunableNumber setPoseY = Tunables.number("Pose/SetYMeters", Constants.SimConstants.StartYMeters, 0, 8.0, null);
+    private final TunableNumber setPoseHeading = Tunables.number("Pose/SetHeadingDegrees", Constants.SimConstants.StartHeadingDegrees, -180, 180, null);
+    private final TunableNumber testDwell = Tunables.number("Tests/SquareWaveDwellSeconds", 2.0, 0.3, 10, null);
+
+    /**
+     * Pathfinds to the outpost (flipped automatically for red), then deploys the intake slightly and pulses the outtake
+     * every few seconds to feed it, until cancelled (right bumper again). Stows when cancelled. The tuned values are read
+     * when the button is pressed, and the waits re-read them every pulse.
+     */
+    private Command outpostFeedCommand() {
+        // Pathfind (around the hub and over a bump, never through a trench) to a staging point out from the wall, then follow a short
+        // straight path into the wall so the robot arrives square, facing the wall, at a gentle speed. Built each time the button is
+        // pressed so tuned values are used; the whole thing is flipped automatically for the red alliance.
+        Command drive = driveToOutpostWithRetries(Constants.OutpostConstants.MaxApproachAttempts);
+
+        Command feed = Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED))
+            .andThen(Commands.repeatingSequence(
+                Commands.defer(() -> Commands.waitSeconds(pulseInterval.get()), Set.of()),
+                Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED_PULSE)),
+                Commands.defer(() -> Commands.waitSeconds(pulseDuration.get()), Set.of()),
+                Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED))));
+
+        Command couldNotArrive = Commands.runOnce(() -> {
+            DogLog.logFault("Outpost feed: did not reach the outpost, giving up");
+            TuningTelemetry.put("Outpost/Status", "Did not reach the outpost (no route, or timed out)");
+        });
+        Command noPose = Commands.runOnce(() -> {
+            DogLog.logFault("Outpost feed: robot pose is not on the field. Set it first (auto start, vision, or Tuning/Pose/Actions/SetRobotPoseNow)");
+            TuningTelemetry.put("Outpost/Status", "Pose is not on the field: set the robot pose first");
+        });
+
+        Command drivesThenFeeds = Commands.runOnce(() -> TuningTelemetry.put("Outpost/Status", "Driving to the outpost"))
+            .andThen(drive)
+            .andThen(Commands.either(
+                Commands.runOnce(() -> TuningTelemetry.put("Outpost/Status", "Feeding")).andThen(feed),
+                couldNotArrive,
+                () -> drivetrain.getState().Pose.getTranslation().getDistance(outpostTargetForAlliance().getTranslation())
+                    < Constants.OutpostConstants.ArrivedToleranceMeters));
+
+        return Commands.either(drivesThenFeeds, noPose, () -> poseLooksValid(drivetrain.getState().Pose))
+            .finallyDo(() -> superStructure.stowIfAllowedElseIdle()) // after feeding the hopper is usually empty, so this normally stows
+            .withName("Outpost feed");
+    }
+
+    private boolean atOutpost() {
+        return drivetrain.getState().Pose.getTranslation().getDistance(outpostTargetForAlliance().getTranslation())
+            < Constants.OutpostConstants.ArrivedToleranceMeters;
+    }
+
+    /**
+     * One attempt is: pathfind, follow the approach path, final align. PathPlanner's path follower ends on a timer, not on position, so if the robot
+     * was bumped off course it can end far from the outpost; when that happens we re-plan from wherever it is now, up to {@code attemptsLeft} times.
+     */
+    private Command driveToOutpostWithRetries(int attemptsLeft) {
+        Command attempt = Commands.defer(this::buildOutpostApproach, Set.of(drivetrain))
+            .withTimeout(Constants.OutpostConstants.PathfindTimeoutSeconds)
+            .andThen(finalAlignToOutpost());
+        if (attemptsLeft <= 1) return attempt;
+        return attempt.andThen(Commands.either(Commands.none(),
+            Commands.runOnce(() -> TuningTelemetry.put("Outpost/Status", "Knocked off course: re-planning"))
+                .andThen(Commands.defer(() -> driveToOutpostWithRetries(attemptsLeft - 1), Set.of(drivetrain))),
+            this::atOutpost));
+    }
+
+    private final SwerveRequest.ApplyFieldSpeeds alignRequest = new SwerveRequest.ApplyFieldSpeeds();
+
+    /**
+     * Creeps onto the exact outpost pose (position and heading) after the approach path, which stops a few centimeters early.
+     * Only runs if the robot is already close; field-relative (blue-origin) speeds, so it works on either alliance.
+     */
+    private Command finalAlignToOutpost() {
+        final edu.wpi.first.math.controller.PIDController headingPid = new edu.wpi.first.math.controller.PIDController(Constants.OutpostConstants.AlignHeadingKp, 0, 0);
+        headingPid.enableContinuousInput(-Math.PI, Math.PI);
+        return Commands.either(
+            drivetrain.run(() -> {
+                Pose2d target = outpostTargetForAlliance();
+                Pose2d now = drivetrain.getState().Pose;
+                double max = Constants.OutpostConstants.AlignMaxSpeedMetersPerSecond;
+                double vx = edu.wpi.first.math.MathUtil.clamp((target.getX() - now.getX()) * Constants.OutpostConstants.AlignKp, -max, max);
+                double vy = edu.wpi.first.math.MathUtil.clamp((target.getY() - now.getY()) * Constants.OutpostConstants.AlignKp, -max, max);
+                double omega = headingPid.calculate(now.getRotation().getRadians(), target.getRotation().getRadians());
+                drivetrain.setControl(alignRequest.withSpeeds(new edu.wpi.first.math.kinematics.ChassisSpeeds(vx, vy, omega)));
+            }).until(this::alignedWithOutpost).withTimeout(Constants.OutpostConstants.AlignTimeoutSeconds),
+            Commands.none(),
+            () -> drivetrain.getState().Pose.getTranslation().getDistance(outpostTargetForAlliance().getTranslation()) < 0.8);
+    }
+
+    private boolean alignedWithOutpost() {
+        Pose2d target = outpostTargetForAlliance();
+        Pose2d now = drivetrain.getState().Pose;
+        return now.getTranslation().getDistance(target.getTranslation()) < Constants.OutpostConstants.AlignToleranceMeters
+            && Math.abs(now.getRotation().minus(target.getRotation()).getDegrees()) < Constants.OutpostConstants.AlignToleranceDegrees;
+    }
+
+    /** The approach: pathfind to the start of a straight path ending at the outpost pose, then follow it. Blue-alliance coordinates. */
+    private Command buildOutpostApproach() {
+        Rotation2d heading = Rotation2d.fromDegrees(outpostHeading.get());
+        Pose2d end = new Pose2d(outpostX.get(), outpostY.get(), heading);
+        // staging point: straight back from the wall along the robot's heading axis (the robot drives toward the wall in the heading direction)
+        Pose2d staging = new Pose2d(
+            end.getX() - heading.getCos() * outpostApproachDistance.get(),
+            end.getY() - heading.getSin() * outpostApproachDistance.get(),
+            heading);
+        PathConstraints approachConstraints = new PathConstraints(
+            outpostApproachVel.get(), outpostApproachAccel.get(),
+            Math.toRadians(outpostMaxAngVel.get()), Math.toRadians(outpostMaxAngAccel.get()));
+        PathPlannerPath approach = new PathPlannerPath(
+            PathPlannerPath.waypointsFromPoses(java.util.List.of(staging, end)),
+            approachConstraints,
+            new IdealStartingState(0.0, heading),   // arrives at the staging point already facing the wall
+            new GoalEndState(0.0, heading));
+        PathConstraints pathfindConstraints = new PathConstraints(
+            outpostMaxVel.get(), outpostMaxAccel.get(),
+            Math.toRadians(outpostMaxAngVel.get()), Math.toRadians(outpostMaxAngAccel.get()));
+        return AutoBuilder.pathfindThenFollowPath(approach, pathfindConstraints);
+    }
+
+    /** Sets the drivetrain's pose to the tuned Pose/Set values (blue-alliance coordinates). */
+    public void setRobotPoseFromTunables() {
+        drivetrain.resetPose(new Pose2d(setPoseX.get(), setPoseY.get(), Rotation2d.fromDegrees(setPoseHeading.get())));
+    }
+
+    /** true if the pose is somewhere on the field. At (0, 0) (nothing has set it yet) the pathfinder cannot plan a route. */
+    static boolean poseLooksValid(Pose2d pose) {
+        return pose.getX() > 0.3 && pose.getX() < 16.2 && pose.getY() > 0.3 && pose.getY() < 7.7;
+    }
+
+    /** The outpost pose for the current alliance. */
+    private Pose2d outpostTargetForAlliance() {
+        Pose2d blue = new Pose2d(outpostX.get(), outpostY.get(), Rotation2d.fromDegrees(outpostHeading.get()));
+        return DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue) == DriverStation.Alliance.Red
+            ? com.pathplanner.lib.util.FlippingUtil.flipFieldPose(blue) : blue;
+    }
+
+    /** Buttons in Elastic (SmartDashboard commands) for tuning tests. */
+    private void configureTuning() {
+        Tunables.action("Pose/Actions/SetRobotPoseNow", this::setRobotPoseFromTunables);
+        // The whole outpost sequence from the dashboard, so it never depends on the controller's button numbering.
+        SmartDashboard.putData("Outpost Feed", outpostFeedCommand());
+        // The floor cannot raise while the intake is stowed (they would collide), so this test deploys the intake first and leaves it deployed.
+        SmartDashboard.putData("Tuning/FourBar Square Wave",
+            Commands.runOnce(() -> IntakePivotHandler.getInstance().setDesiredState(IntakePivotHandler.IntakePivotState.ENGADGED))
+                .andThen(Commands.waitUntil(() -> IntakePivotHandler.getInstance().getPositionDeg() < Constants.InterlockConstants.IntakeClearBelowDeg - 5).withTimeout(4))
+                .andThen(fourBarHandler.squareWave(testDwell::get))
+                .withName("FourBar square wave (deploys the intake first)"));
+        SmartDashboard.putData("Tuning/IntakePivot Square Wave", IntakePivotHandler.getInstance().squareWave(testDwell::get));
+    }
+
+    /** For simulation tests. */
+    FuelSimulation getFuelSimulation() {
+        return fuelSimulation;
+    }
+
+    /** Called from Robot.simulationPeriodic(). */
+    public void simulationPeriodic() {
+        if (fuelSimulation != null) fuelSimulation.update();
     }
 
     /** Logs the controller inputs that drive the intake bindings, to debug mapping problems. Call every loop. */
+    private String lastPressedRaw = "";
+    private long lastButtonMask = -1;
+
     public void logInputs() {
+        // Which raw buttons the driver station sees pressed, 1-based (what the sim GUI numbers them). In simulation this is how
+        // you find out which number a physical button has, for the SIM_BUTTON_* table in SimAwareXboxController.
+        long mask = DriverStation.getStickButtons(0);
+        if (mask != lastButtonMask) { // only rebuild the text when a button actually changed
+            lastButtonMask = mask;
+            StringBuilder pressed = new StringBuilder();
+            for (int i = 0; i < 32; i++) {
+                if ((mask & (1L << i)) != 0) pressed.append(pressed.length() == 0 ? "" : ",").append(i + 1);
+            }
+            String now = pressed.toString();
+            TuningTelemetry.put("Controller/PressedRawButtons", now);
+            if (RobotBase.isSimulation() && !now.equals(lastPressedRaw)) {
+                System.out.println("[Controller] raw buttons pressed: " + (now.isEmpty() ? "(none)" : now));
+            }
+            lastPressedRaw = now;
+        }
         DogLog.log("Controller/LeftTrigger", joystick.getLeftTriggerAxis());
         DogLog.log("Controller/RightTrigger", joystick.getRightTriggerAxis());
         DogLog.log("Controller/LeftTriggerPressed", joystick.leftTrigger().getAsBoolean());
         DogLog.log("Controller/RightTriggerPressed", joystick.rightTrigger().getAsBoolean());
     }
 
-    /** Called when a trigger is released: if the other trigger is still held, go to its state, otherwise stow. */
-    private void stowOrKeepHeldState() {
+    private boolean lastStowRefused = false;
+
+    /** The stow button: stows the intake only if the hopper is (nearly) empty; if refused, buzz the controller. */
+    private Command stowIntakeButton() {
+        return Commands.runOnce(() -> {
+                int before = superStructure.getStowRefusals();
+                superStructure.setDesiredState(SuperStructureState.STOWED);
+                lastStowRefused = superStructure.getStowRefusals() != before;
+            })
+            .andThen(Commands.either(
+                Commands.startEnd(() -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 1.0),
+                                  () -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 0.0)).withTimeout(0.4),
+                Commands.none(),
+                () -> lastStowRefused))
+            .ignoringDisable(true)
+            .withName("Stow intake (only if the hopper is nearly empty)");
+    }
+
+    /** Called when a trigger is released: if the other trigger is still held, go to its state, otherwise go idle (intake stays put). */
+    private void idleOrKeepHeldState() {
         if (joystick.leftTrigger().getAsBoolean()) {
             superStructure.setDesiredState(SuperStructureState.INTAKE);
         } else if (joystick.rightTrigger().getAsBoolean()) {
             superStructure.setDesiredState(SuperStructureState.POOP);
         } else {
-            superStructure.setDesiredState(SuperStructureState.STOWED);
+            superStructure.setDesiredState(SuperStructureState.IDLE);
         }
     }
 

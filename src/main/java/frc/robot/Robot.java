@@ -7,6 +7,8 @@ package frc.robot;
 import com.ctre.phoenix6.HootAutoReplay;
 
 import edu.wpi.first.math.util.Units;
+import frc.robot.tuning.PerfMonitor;
+import frc.robot.tuning.Tunables;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
@@ -27,12 +29,31 @@ public class Robot extends TimedRobot {
         m_robotContainer = new RobotContainer();
     }
 
+    /** For simulation tests that drive the whole robot. */
+    public RobotContainer getRobotContainer() {
+        return m_robotContainer;
+    }
+
     @Override
     public void robotPeriodic() {
+        long loopStartNanos = PerfMonitor.now();
+        robotPeriodicInner();
+        PerfMonitor.endLoop(loopStartNanos);
+    }
+
+    private void robotPeriodicInner() {
+        long loopStart = PerfMonitor.now();
+        long t = loopStart;
         m_timeAndJoystickReplay.update();
+        t = PerfMonitor.lap("Loop.Replay", t);
+        Tunables.periodic(); // apply anything edited live in Elastic
+        t = PerfMonitor.lap("Loop.Tunables", t);
         CommandScheduler.getInstance().run();
+        t = PerfMonitor.lap("Loop.Scheduler(all subsystems)", t);
         Visualizer.log();
+        t = PerfMonitor.lap("Loop.Visualizer", t);
         m_robotContainer.logInputs();
+        t = PerfMonitor.lap("Loop.LogInputs", t);
 
         /*
          * This example of adding Limelight is very simple and may not be sufficient for on-field use.
@@ -104,5 +125,9 @@ public class Robot extends TimedRobot {
     public void testExit() {}
 
     @Override
-    public void simulationPeriodic() {}
+    public void simulationPeriodic() {
+        long t = PerfMonitor.now();
+        m_robotContainer.simulationPeriodic();
+        PerfMonitor.lap("Sim.FuelSim", t);
+    }
 }

@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import edu.wpi.first.hal.HAL;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import frc.robot.tuning.Tunables;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -44,6 +46,10 @@ class FourBarHandlerTest {
         DriverStationSim.setDsAttached(true);
         DriverStationSim.setEnabled(true);
         DriverStationSim.notifyNewData();
+        // These tests check the floor's state machine on its own; the intake interlock is tested separately (InterlockSimTest).
+        NetworkTableInstance.getDefault().getEntry("/Tuning/Interlock/Enabled").setBoolean(false);
+        frc.robot.util.MechanismInterlock.get();
+        Tunables.pollAll();
         handler = FourBarHandler.getInstance();
         runUntil(() -> false, 0.5);
     }
@@ -51,12 +57,14 @@ class FourBarHandlerTest {
     @AfterEach
     void tearDown() {
         CommandScheduler.getInstance().cancelAll();
+        Tunables.resetAllToDefaults();
         handler.closeForTesting();
     }
 
     private boolean runUntil(BooleanSupplier done, double timeoutSeconds) {
         double start = Timer.getFPGATimestamp();
         while (Timer.getFPGATimestamp() - start < timeoutSeconds) {
+            Tunables.pollAll();
             CommandScheduler.getInstance().run();
             Timer.delay(0.02);
             if (done.getAsBoolean()) return true;
@@ -72,43 +80,64 @@ class FourBarHandlerTest {
     }
 
     @Test
-    void startsStowed() {
-        assertEquals(FourBarState.STOWED, handler.getCurrentState());
-        assertEquals(FourBarState.STOWED, handler.getDesiredState());
+    void startsFlat() {
+        assertEquals(FourBarState.FLAT, handler.getCurrentState());
+        assertEquals(FourBarState.FLAT, handler.getDesiredState());
     }
 
     @ParameterizedTest @EnumSource(Load.class)
     void transitionsThroughEveryState(Load load) {
         handler.setSimMassKgForTesting(load.massKg);
-        assertReaches(FourBarState.INTAKE, FourBarConstants.IntakeRot);
-        assertReaches(FourBarState.STOWED, FourBarConstants.StowRot);
-        assertReaches(FourBarState.INTAKE, FourBarConstants.IntakeRot);
+        assertReaches(FourBarState.RAISED, FourBarConstants.RaisedRot);
+        assertReaches(FourBarState.FLAT, FourBarConstants.FlatRot);
+        assertReaches(FourBarState.RAISED, FourBarConstants.RaisedRot);
     }
 
     @ParameterizedTest @EnumSource(Load.class)
     void currentStateLagsDesiredUntilArrival(Load load) {
         handler.setSimMassKgForTesting(load.massKg);
-        handler.setDesiredState(FourBarState.INTAKE);
-        assertNotEquals(FourBarState.INTAKE, handler.getCurrentState(), "state flipped before the mechanism moved");
-        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.INTAKE, 3.0));
+        handler.setDesiredState(FourBarState.RAISED);
+        assertNotEquals(FourBarState.RAISED, handler.getCurrentState(), "state flipped before the mechanism moved");
+        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.RAISED, 3.0));
     }
 
     @Test
     void homingIsNotARequestableState() {
         handler.setDesiredState(FourBarState.HOMING);
-        assertEquals(FourBarState.STOWED, handler.getDesiredState());
+        assertEquals(FourBarState.FLAT, handler.getDesiredState());
     }
 
     @ParameterizedTest @EnumSource(Load.class)
-    void rehomeEndsStowed(Load load) {
+    void rehomeEndsFlat(Load load) {
         handler.setSimMassKgForTesting(load.massKg);
-        assertReaches(FourBarState.INTAKE, FourBarConstants.IntakeRot);
+        assertReaches(FourBarState.RAISED, FourBarConstants.RaisedRot);
         Command c = handler.rehome();
         c.schedule();
         CommandScheduler.getInstance().run();
         assertEquals(FourBarState.HOMING, handler.getCurrentState());
         assertTrue(runUntil(() -> !c.isScheduled(), FourBarConstants.HomingTimeoutSeconds + 1));
-        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.STOWED, 3.0), "not STOWED after re-home");
-        assertEquals(FourBarConstants.StowRot, handler.getAngleRot(), FourBarConstants.PositionToleranceRot);
+        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.FLAT, 3.0), "not FLAT after re-home");
+        assertEquals(FourBarConstants.FlatRot, handler.getAngleRot(), FourBarConstants.PositionToleranceRot);
+    }
+
+    @org.junit.jupiter.api.Test
+    void changingASetpointInNetworkTablesMovesTheFloorToTheNewPosition() {
+        assertReaches(FourBarState.RAISED, FourBarConstants.RaisedRot);
+        double newRaised = FourBarConstants.RaisedRot - 0.04;
+        NetworkTableInstance.getDefault().getEntry("/Tuning/FourBar/Setpoints/RaisedRot").setDouble(newRaised);
+        assertTrue(runUntil(() -> Math.abs(handler.getAngleRot() - newRaised) < FourBarConstants.PositionToleranceRot, 3.0),
+            "floor should follow the edited setpoint, at " + handler.getAngleRot());
+        assertEquals(FourBarState.RAISED, handler.getCurrentState());
+    }
+
+    @org.junit.jupiter.api.Test
+    void squareWaveAlternatesFlatAndRaisedAndEndsFlat() {
+        Command c = handler.squareWave(() -> 1.2);
+        c.schedule();
+        assertTrue(runUntil(() -> handler.getDesiredState() == FourBarState.RAISED, 1.0));
+        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.RAISED, 3.0), "should reach raised");
+        assertTrue(runUntil(() -> handler.getDesiredState() == FourBarState.FLAT, 3.0), "should come back down");
+        CommandScheduler.getInstance().cancel(c);
+        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.FLAT, 3.0), "cancelling leaves it flat");
     }
 }

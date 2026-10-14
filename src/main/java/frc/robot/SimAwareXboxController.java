@@ -30,6 +30,22 @@ public class SimAwareXboxController extends CommandXboxController {
     public static final int SIM_LEFT_TRIGGER = 5;  // swapped: pressing the left trigger showed up on sim axis 5
     public static final int SIM_RIGHT_TRIGGER = 4; // swapped: pressing the right trigger showed up on sim axis 4
 
+    // ---- Sim-only button numbers (1-based, as the sim GUI's Joysticks window numbers them) ----
+    // Measured on the Xbox Wireless Controller over Bluetooth on macOS, which gives the sim 27 raw buttons in a different order
+    // than a real Xbox controller on the robot. Each standard button is looked up here in simulation. To re-measure (or for a
+    // different controller), watch /Tuning/Controller/PressedRawButtons or the terminal while pressing a physical button.
+    public static final int SIM_BUTTON_A = 1;
+    public static final int SIM_BUTTON_B = 2;
+    public static final int SIM_BUTTON_X = 4;
+    public static final int SIM_BUTTON_Y = 5;
+    public static final int SIM_BUTTON_LEFT_BUMPER = 7;
+    public static final int SIM_BUTTON_RIGHT_BUMPER = 8;
+    public static final int SIM_BUTTON_BACK = 11;   // the small left button (View)
+    public static final int SIM_BUTTON_START = 12;  // the small right button (Menu)
+    public static final int SIM_BUTTON_LEFT_STICK = 14;
+    public static final int SIM_BUTTON_RIGHT_STICK = 15;
+    // (raw button 17 reads as permanently pressed on this controller, and 24..27 mirror the D-pad; neither is used.)
+
     /** Set false if the sim triggers already read 0..1 (rest at 0). */
     public static final boolean SIM_TRIGGERS_REST_AT_NEGATIVE_ONE = true;
 
@@ -92,6 +108,58 @@ public class SimAwareXboxController extends CommandXboxController {
     @Override
     public double getRightTriggerAxis() {
         return simulation ? getRawAxis(Axis.kRightTrigger.value) : super.getRightTriggerAxis();
+    }
+
+    // Buttons: in simulation each one is looked up in the SIM_BUTTON_* table above (the base class would use the real numbers).
+
+    @Override
+    public Trigger a(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_A, loop) : super.a(loop);
+    }
+
+    @Override
+    public Trigger b(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_B, loop) : super.b(loop);
+    }
+
+    @Override
+    public Trigger x(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_X, loop) : super.x(loop);
+    }
+
+    @Override
+    public Trigger y(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_Y, loop) : super.y(loop);
+    }
+
+    @Override
+    public Trigger leftBumper(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_LEFT_BUMPER, loop) : super.leftBumper(loop);
+    }
+
+    @Override
+    public Trigger rightBumper(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_RIGHT_BUMPER, loop) : super.rightBumper(loop);
+    }
+
+    @Override
+    public Trigger back(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_BACK, loop) : super.back(loop);
+    }
+
+    @Override
+    public Trigger start(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_START, loop) : super.start(loop);
+    }
+
+    @Override
+    public Trigger leftStick(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_LEFT_STICK, loop) : super.leftStick(loop);
+    }
+
+    @Override
+    public Trigger rightStick(EventLoop loop) {
+        return simulation ? button(SIM_BUTTON_RIGHT_STICK, loop) : super.rightStick(loop);
     }
 
     // The base class builds these from the raw HID axis, bypassing the getters above, so they are overridden too.
