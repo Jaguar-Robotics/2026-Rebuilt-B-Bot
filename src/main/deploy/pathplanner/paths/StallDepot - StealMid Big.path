@@ -1,0 +1,119 @@
+{
+  "version": "2025.0",
+  "waypoints": [
+    {
+      "anchor": {
+        "x": 6.501644345238095,
+        "y": 7.402053571428571
+      },
+      "prevControl": null,
+      "nextControl": {
+        "x": 8.211272321428572,
+        "y": 7.447730654761905
+      },
+      "isLocked": false,
+      "linkedName": "StallMidDepot"
+    },
+    {
+      "anchor": {
+        "x": 8.73329613095238,
+        "y": 6.560290178571429
+      },
+      "prevControl": {
+        "x": 8.752872023809523,
+        "y": 7.0496875
+      },
+      "nextControl": {
+        "x": 8.719473553642159,
+        "y": 6.214725745815867
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 8.73329613095238,
+        "y": 1.4509821428571434
+      },
+      "prevControl": {
+        "x": 8.79202380952381,
+        "y": 2.312321428571429
+      },
+      "nextControl": {
+        "x": 8.661403271721138,
+        "y": 0.39655354079894356
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 7.597894345238096,
+        "y": 1.8163988095238097
+      },
+      "prevControl": {
+        "x": 7.597894345238096,
+        "y": 0.9093824404761903
+      },
+      "nextControl": {
+        "x": 7.597894345238096,
+        "y": 2.8804336255400935
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 8.485334821428571,
+        "y": 4.028474702380953
+      },
+      "prevControl": {
+        "x": 7.616587563977383,
+        "y": 4.028474702380953
+      },
+      "nextControl": null,
+      "isLocked": false,
+      "linkedName": null
+    }
+  ],
+  "rotationTargets": [
+    {
+      "waypointRelativePos": 0.7792792792792788,
+      "rotationDegrees": 90.0
+    },
+    {
+      "waypointRelativePos": 1.846846846846848,
+      "rotationDegrees": 90.0
+    },
+    {
+      "waypointRelativePos": 3.0585585585585626,
+      "rotationDegrees": -90.0
+    },
+    {
+      "waypointRelativePos": 3.4504504504504574,
+      "rotationDegrees": -90.0
+    }
+  ],
+  "constraintZones": [],
+  "pointTowardsZones": [],
+  "eventMarkers": [],
+  "globalConstraints": {
+    "maxVelocity": 3.5,
+    "maxAcceleration": 7.0,
+    "maxAngularVelocity": 540.0,
+    "maxAngularAcceleration": 720.0,
+    "nominalVoltage": 12.0,
+    "unlimited": false
+  },
+  "goalEndState": {
+    "velocity": 0,
+    "rotation": 180.0
+  },
+  "reversed": false,
+  "folder": null,
+  "idealStartingState": {
+    "velocity": 0,
+    "rotation": 180.0
+  },
+  "useDefaultConstraints": true
+}
