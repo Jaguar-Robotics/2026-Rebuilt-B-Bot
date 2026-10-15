@@ -90,6 +90,21 @@ public class IntakePivotHandler extends SubsystemBase implements StateSubsystem 
         .withName("IntakePivot square wave");
   }
 
+  /** Declares the intake to be physically stowed right now (re-seeds the motor position) and holds it there. */
+  public void rezeroToStowed() {
+    IntakePivotSubsystem.rezeroToStowed();
+    currentState = IntakePivotState.STOWED;
+    desiredState = IntakePivotState.STOWED;
+  }
+
+  public boolean isPositionLost() {
+    return IntakePivotSubsystem.isPositionLost();
+  }
+
+  public void markPositionLostForTesting() {
+    IntakePivotSubsystem.markPositionLostForTesting();
+  }
+
   /** The intake's actual angle in degrees (0 = deployed). */
   public double getPositionDeg() {
     return IntakePivotSubsystem.getPosition().in(Degrees);

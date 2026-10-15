@@ -5,20 +5,23 @@ import edu.wpi.first.units.measure.Angle;
 
 public class Constants {
 
-    public static String UpperCanBus = "Upper";
+    public static String DriveBus = "Drive";
 
         public static abstract class IntakeConstants{
-            public static final int IntakeLeaderID = 53;
-            public static final int IntakefollowerID = 54;
-            public static final int ReversedIntakeID = 55;
-            public static final int ReversedIntakeID2 = 56;
+            public static final int IntakeLeaderID = 30; //lower left 
+            public static final int IntakefollowerID = 31; //top left 
+            public static final int ReversedIntakeID = 32; //lower right
+            public static final int ReversedIntakeID2 = 33; //top right
 
             public static final double SlowSpeed = 0.5;
             public static final double Fast = 1.0;
             public static final double RevSlowSpeed = -0.5;
             public static final double RevFast = -1.0;
 
-            public static final int IntakePivotMotorID = 50;
+            public static final int IntakePivotMotorID = 20;
+            // The real motor turns the other way from the code's convention (0 deg = deployed, 120 deg = stowed): after seeding 120 at stowed,
+            // the deployed intake read 235 deg. Inverting makes deploying decrease the angle. Real robot only (the sim already uses the code's convention).
+            public static final boolean PivotInverted = true;
             public static final Angle PivotLowSetpoint = Degrees.of(0); //based on pivot 
             public static final Angle PivotHighSetpoint = PivotLowSetpoint.plus(Degrees.of(120)); //also starting config
             // Feeding the outpost: the intake is almost fully deployed (0 deg) and pressed against the wall, raised a little so the balls
@@ -45,8 +48,9 @@ public class Constants {
         }
 
         public static abstract class KickerConstants{
-            public static final int KickerLeaderID = 51;
-            public static final int KickerFollowerID = 52;
+            public static final int KickerLeaderID = 23;
+            public static final int KickerFollowerID = 24;
+            public static final boolean LeaderInverted = true; // TODO: confirm on the robot (it spun the wrong way when this was false)
 
             public static final double SlowSpeed = 0.5;
             public static final double Fast = 1.0;
@@ -60,16 +64,16 @@ public class Constants {
          */
         public static abstract class FourBarConstants{
             // ---- CAN (TODO: confirm bus and IDs; 20/21 are unused by the other subsystems and TunerConstants) ----
-            public static final String CanBus = UpperCanBus; // TODO: bus the Krakens are actually on
-            public static final int LeaderID = 20;           // TODO
-            public static final int FollowerID = 21;         // TODO
+            public static final String CanBus = DriveBus; // TODO: bus the Krakens are actually on
+            public static final int LeaderID = 21;           
+            public static final int FollowerID = 22;
             public static final boolean LeaderInverted = false; // TODO: set true if positive output drives the link DOWN
             // Follower always runs opposed to the leader.
 
             // ---- Mechanism ----
             // 4-bar with the hopper floor as the coupler; the motors drive the back long link (angle 0 = that link horizontal,
             // pointing back). Short links are 0.0660 m (2.598 in). Link up = floor RAISED, link down = floor FLAT.
-            public static final double GearReduction = 192.0;     // motor : driven link
+            public static final double GearReduction = 106.667;   // each side: motor : driven link (106.667:1, confirmed by the team after the first on-robot test)
             public static final double LinkLengthMeters = 0.2939; // long (driven) links, 11.569 in
             public static final double MovingMassEmptyKg = 3.67;  // 8.1 lb
             public static final double MovingMassLoadedKg = 27.2; // ~60 lb, full of balls
@@ -78,16 +82,17 @@ public class Constants {
             // ---- Hard stops (physical), mechanism rotations ----
             public static final double UpStopRot = 0.173785;    // 62.562735 deg. Link up: the floor is RAISED (tilted for outtake)
             public static final double DownStopRot = -0.010537; // -3.793269 deg. Link down: the floor is FLAT. The robot boots against
-                                                                // this stop and the position is seeded here (re-home drives into it)
-            public static final double SoftLimitMarginRot = 0.002; // soft limits sit this far inside each hard stop
+                                                                // this stop and the position is seeded here (the Back button re-seeds it while disabled)
+            public static final double SoftLimitMarginRot = 0.002; // the down soft limit sits this far inside the down stop
+            public static final double UpSoftLimitMarginRot = 0.010; // the up soft limit sits this far (3.6 deg) inside the up stop, so nothing can command the floor into it
 
             // ---- Setpoints ----
             // The floor is flat except while outtaking.
             public static final double FlatRot = -0.008;    // just above the down stop: floor flat (default, boot, intaking, stowed)
-            public static final double RaisedRot = 0.17;    // just under the up stop: floor tilted up for outtake
+            public static final double RaisedRot = 0.16;    // 5 deg under the up stop (0.17 bent the SRPP plates a little on the real robot): floor tilted up for outtake
 
             // ---- Current limits ----
-            public static final double StatorCurrentLimitAmps = 60.0; // TODO: confirm
+            public static final double StatorCurrentLimitAmps = 40.0; // per motor. With 106:1 on each side even this is a lot of force at a hard stop, so keep it low
 
             // ---- Control gains. TODO: SIM-TUNED STARTING VALUES, MUST BE TUNED ON THE REAL ROBOT ----
             // One gain slot covers empty and loaded in sim because kP is high enough to absorb the kG mismatch;
@@ -97,12 +102,12 @@ public class Constants {
             public static final double kI = 0.0;
             public static final double kD = 15.0;
             public static final double kS = 0.0;
-            public static final double kV = 23.0;  // ~12 V / (Kraken free speed / reduction)
+            public static final double kV = 12.8;  // ~12 V / (Kraken free speed / reduction) = 12 / (100 rps / 106.667)
             public static final double kA = 0.0;
-            public static final double kG = 0.4;   // Arm_Cosine. Compromise: empty needs ~0.09 V, fully loaded ~0.7 V (CG at link end). Sim-checked for both with this one slot
-            public static final double CruiseVelocityRotPerSec = 0.35;
-            public static final double AccelerationRotPerSecSq = 1.5;
-            public static final double JerkRotPerSecCubed = 15.0;
+            public static final double kG = 0.45;  // Arm_Cosine. Re-measured in the sim at 106.667: empty needs ~0.08 V, fully loaded ~0.62 V. Leaning toward loaded so a full floor does not sag toward the down stop. Compromise: empty needs ~0.09 V, fully loaded ~0.7 V (CG at link end). Sim-checked for both with this one slot
+            public static final double CruiseVelocityRotPerSec = 0.30;
+            public static final double AccelerationRotPerSecSq = 1.0;
+            public static final double JerkRotPerSecCubed = 10.0;
 
             // ---- atSetpoint() tolerances (setpoints are only a few thousandths of a rotation from the stops) ----
             // The single compromise kG leaves the empty link ~0.0008 rot off its target at the intake setpoint, so this has
@@ -110,19 +115,12 @@ public class Constants {
             public static final double PositionToleranceRot = 0.002;
             public static final double VelocityToleranceRotPerSec = 0.02;
 
-            // ---- Re-home (TODO: tune on the robot) ----
-            public static final double HomingVolts = 1.5;                   // slow drive toward the up stop
-            public static final double HomingStallCurrentAmps = 25.0;       // stator current that means "pushing on the stop"
-            public static final double HomingStallVelocityRotPerSec = 0.01; // and basically not moving
-            public static final double HomingStallDebounceSeconds = 0.15;
-            public static final double HomingTimeoutSeconds = 6.0;
-
             // ---- Outtake sequencing ----
             // The floor must not tilt up into a packed hopper or it jams. The load on the floor is estimated from the motors'
             // holding current with the floor flat: about EmptyHoldCurrentAmps with no fuel, FullHoldCurrentAmps with a full hopper.
             // TODO: these two are derived from the sim (per motor, at the flat angle); measure them on the robot.
-            public static final double EmptyHoldCurrentAmps = 1.4;
-            public static final double FullHoldCurrentAmps = 10.5;
+            public static final double EmptyHoldCurrentAmps = 2.5;
+            public static final double FullHoldCurrentAmps = 18.9;
             // The floor may go up once the hopper holds fewer than this many balls (so a nearly empty hopper lifts immediately).
             // A packed hopper waits until the rollers have drained it below this. Tune it in Elastic: /Tuning/Hopper/LiftWhenBelowBalls.
             public static final double RaiseBelowBalls = 136.0;

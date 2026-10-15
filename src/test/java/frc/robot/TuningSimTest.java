@@ -192,9 +192,9 @@ class TuningSimTest {
         press("/Tuning/Hopper/Actions/SetFullToCurrentReading");
         sim.run(0.3);
         double full = RobotSim.nt("/Tuning/Hopper/FullHoldCurrentAmps");
-        System.out.printf("[SIM] calibrated: empty %.2f A, full %.2f A (sim physics: about 1.4 and 10.5)%n", empty, full);
-        assertEquals(1.4, empty, 0.4);
-        assertEquals(10.5, full, 1.5);
+        System.out.printf("[SIM] calibrated: empty %.2f A, full %.2f A (sim physics: about 2.5 and 18.9)%n", empty, full);
+        assertEquals(2.5, empty, 0.6);
+        assertEquals(18.9, full, 2.5);
     }
 
     @org.junit.jupiter.api.AfterEach

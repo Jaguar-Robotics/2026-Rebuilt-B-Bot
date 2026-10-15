@@ -23,8 +23,7 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
 
     public enum FourBarState implements State {
         FLAT,   // floor flat: the default, boot, intaking and stowed
-        RAISED, // floor tilted up so balls roll to the intake: only while outtaking
-        HOMING // re-home in progress; also left set if a re-home fails to find the hard stop
+        RAISED // floor tilted up so balls roll to the intake: only while outtaking
   }
 
   private static FourBarHandler instance;
@@ -48,7 +47,7 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
 
   @Override
   public void setDesiredState(State state){
-        if (state instanceof FourBarState fourBarState && desiredState != fourBarState && fourBarState != FourBarState.HOMING) {
+        if (state instanceof FourBarState fourBarState && desiredState != fourBarState) {
         desiredState = fourBarState;
 
         handleStateTransition();
@@ -63,9 +62,6 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
         break;
         case RAISED:
             fourBarSubsystem.setTarget(Rotations.of(effectiveTarget(FourBarState.RAISED)));
-        break;
-        case HOMING:
-            // only entered through rehome()
         break;
     }
   }
@@ -87,7 +83,7 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
   /** Marks the current state once the mechanism has actually arrived at the desired one. */
   @Override
   public void update() {
-    if (currentState != desiredState && desiredState != FourBarState.HOMING
+    if (currentState != desiredState
         && fourBarSubsystem.atSetpoint()
         && Math.abs(fourBarSubsystem.getTarget().in(Rotations) - fourBarSubsystem.clampToLimits(angleOf(desiredState))) < 1e-6) {
         currentState = desiredState;
@@ -102,21 +98,18 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
   }
 
   /**
-   * Drives into the stow hard stop and re-zeroes. State is HOMING while it runs, then FLAT if the stop
-   * was found. If it was not (timeout/interrupt) the state stays HOMING until a new state is requested.
+   * Zeroes the floor position at the down stop (see {@link FourBarSubsystem#zeroHere()}). No motion. Only works while the robot is disabled,
+   * with the floor resting flat.
    */
-  public Command rehome() {
+  public Command zeroHere() {
     return Commands.runOnce(() -> {
-            desiredState = FourBarState.HOMING;
-            currentState = FourBarState.HOMING;
-        })
-        .andThen(fourBarSubsystem.rehome())
-        .finallyDo(() -> {
-            if (Math.abs(fourBarSubsystem.getTarget().in(Rotations) - fourBarSubsystem.getFlatRot()) < 1e-6) {
-                desiredState = FourBarState.FLAT; // update() flips currentState once it is flat
+            if (fourBarSubsystem.zeroHere()) {
+                desiredState = FourBarState.FLAT;
+                currentState = FourBarState.FLAT;
             }
         })
-        .withName("FourBarHandler rehome");
+        .ignoringDisable(true)
+        .withName("FourBarHandler zeroHere");
   }
 
   public FourBarState getCurrentState() {
@@ -130,6 +123,14 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
   /** true when the floor is flat and not moving, so its holding current reflects only the weight on it. */
   public boolean isFlatAndStill() {
       return currentState == FourBarState.FLAT && fourBarSubsystem.atSetpoint();
+  }
+
+  public boolean isPositionLost() {
+      return fourBarSubsystem.isPositionLost();
+  }
+
+  public void markPositionLostForTesting() {
+      fourBarSubsystem.markPositionLostForTesting();
   }
 
   public double getHoldCurrentAmps() {
@@ -175,7 +176,6 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
 
   /** If a setpoint is edited in Elastic while the floor is in that state, move to the new position right away. */
   private void followTunedSetpoints() {
-    if (desiredState == FourBarState.HOMING) return;
     double want = effectiveTarget(desiredState);
     if (Math.abs(fourBarSubsystem.getTarget().in(Rotations) - want) > 1e-9) {
         fourBarSubsystem.setTarget(Rotations.of(want));

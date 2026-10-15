@@ -158,15 +158,22 @@ public class RobotContainer {
         joystick.rightTrigger().onFalse(new InstantCommand(this::idleOrKeepHeldState));
         // A: stow the intake. Only works when the hopper is empty or nearly empty; otherwise it buzzes the controller and nothing moves.
         joystick.a().onTrue(stowIntakeButton());
+        // X: re-zero the intake pivot (only press it with the intake physically stowed against its stop, e.g. if the intake lost its position)
+        joystick.x().onTrue(new InstantCommand(superStructure::rezeroIntakeToStowed).ignoringDisable(true));
 
         // Press right bumper once: drive to the outpost, then keep feeding it on its own. Press again to cancel and stow.
         joystick.rightBumper().toggleOnTrue(outpostFeedCommand());
 
+        // If the floor or intake lose their zero (a motor rebooted, or the reading jumped), warn the driver with a long rumble.
+        new edu.wpi.first.wpilibj2.command.button.Trigger(superStructure::isPositionLost).onTrue(
+            Commands.startEnd(() -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 1.0),
+                              () -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 0.0)).withTimeout(1.5).ignoringDisable(true));
+
         // 4-bar (temporary test bindings; the floor normally follows the SuperStructure states above)
-        joystick.back().onTrue(fourBarHandler.rehome());
+        joystick.povDown().onTrue(fourBarHandler.zeroHere()); // D-pad down. Disabled only: floor resting flat on its down stop
         SmartDashboard.putData("FourBar Raise", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.RAISED)).ignoringDisable(true));
         SmartDashboard.putData("FourBar Flat", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.FLAT)).ignoringDisable(true));
-        SmartDashboard.putData("FourBar Rehome", fourBarHandler.rehome());
+        SmartDashboard.putData("FourBar Zero Here (disabled only, floor resting flat)", fourBarHandler.zeroHere());
         // Same as left trigger / left bumper, for testing without a controller
         SmartDashboard.putData("Intake Deploy", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)).ignoringDisable(true));
         SmartDashboard.putData("Intake Stow (only if hopper nearly empty)", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)).ignoringDisable(true));

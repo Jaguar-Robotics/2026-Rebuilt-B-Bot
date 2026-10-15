@@ -127,12 +127,20 @@ public class IntakePivotSubsystem extends SubsystemBase {
 
 
     /* leader and follower motors */
-    private final TalonFX IntakePivotMotor = new TalonFX(Constants.IntakeConstants.IntakePivotMotorID, Constants.UpperCanBus);
+    private final TalonFX IntakePivotMotor = new TalonFX(Constants.IntakeConstants.IntakePivotMotorID, Constants.DriveBus);
 
     /* device status signals */
     private final StatusSignal<Angle> IntakePivotMotorPosition = IntakePivotMotor.getPosition(false);
     private final StatusSignal<AngularVelocity> IntakePivotMotorVelocity = IntakePivotMotor.getVelocity(false);
     private final StatusSignal<Current> IntakePivotMotorTorqueCurrent = IntakePivotMotor.getTorqueCurrent(false);
+    // diagnostics: what the motor itself reports (published under /Tuning/IntakePivot/Diagnostics)
+    private final StatusSignal<edu.wpi.first.units.measure.Voltage> diagMotorVoltage = IntakePivotMotor.getMotorVoltage(false);
+    private final StatusSignal<com.ctre.phoenix6.signals.ControlModeValue> diagControlMode = IntakePivotMotor.getControlMode(false);
+    private final StatusSignal<Boolean> diagForwardSoftLimit = IntakePivotMotor.getFault_ForwardSoftLimit(false);
+    private final StatusSignal<Boolean> diagReverseSoftLimit = IntakePivotMotor.getFault_ReverseSoftLimit(false);
+    private final StatusSignal<Boolean> diagUnlicensed = IntakePivotMotor.getFault_UnlicensedFeatureInUse(false);
+    private com.ctre.phoenix6.StatusCode lastControlStatus = com.ctre.phoenix6.StatusCode.OK;
+    private com.ctre.phoenix6.StatusCode lastConfigStatus = com.ctre.phoenix6.StatusCode.OK;
 
     /* controls used by the leader motors */
     private final MotionMagicVoltage setpointRequest = new MotionMagicVoltage(0);
@@ -202,6 +210,11 @@ public class IntakePivotSubsystem extends SubsystemBase {
     public IntakePivotSubsystem() {
 
 
+        if (!Utils.isSimulation()) {
+            IntakePivotMotorConfigs.MotorOutput.Inverted = Constants.IntakeConstants.PivotInverted
+                ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
+                : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        }
         IntakePivotMotorConfigs.Slot0 = slot0();
         IntakePivotMotorConfigs.MotionMagic = motionMagicConfigs();
         IntakePivotMotorConfigs.SoftwareLimitSwitch = softLimits();
@@ -210,9 +223,17 @@ public class IntakePivotSubsystem extends SubsystemBase {
 
         for (int i = 0; i < kNumConfigAttempts; ++i) {
             var status = IntakePivotMotor.getConfigurator().apply(IntakePivotMotorConfigs);
+            lastConfigStatus = status;
             if (status.isOK()) break;
         }
 
+
+        // The TalonFX encoder reads 0 at power-up, which would be "fully deployed" (0 deg). The robot boots with the intake stowed, so tell
+        // the motor that is where it is; otherwise "deploy" is already satisfied and the intake never moves. (The sim reports absolute angles.)
+        if (!Utils.isSimulation()) {
+            var seedStatus = IntakePivotMotor.setPosition(Constants.IntakeConstants.PivotHighSetpoint, 0.25);
+            System.out.println("IntakePivot (ID " + Constants.IntakeConstants.IntakePivotMotorID + " on bus " + Constants.DriveBus + "): config " + lastConfigStatus + ", position seed " + seedStatus);
+        }
 
         // Create the ligament representing the arm, attach it to the root
         IntakePivotMotorMech2d = mech2dRoot.append(
@@ -355,7 +376,7 @@ public class IntakePivotSubsystem extends SubsystemBase {
         target = clampToLimits(target);
         this.target = target;
         setpointRequest.withPosition(target);
-        IntakePivotMotor.setControl(setpointRequest);
+        lastControlStatus = IntakePivotMotor.setControl(setpointRequest);
         System.out.print(target.in(Radians));
     }
 
@@ -394,12 +415,42 @@ public class IntakePivotSubsystem extends SubsystemBase {
     }
     */
 
+    /**
+     * Tells the motor the intake is at the stowed angle right now, and holds it there. Real robot only: the sim reports true angles
+     * and never loses position.
+     */
+    public void rezeroToStowed() {
+        // The physical stowed angle is a fixed reference (the stow hard stop), not the tunable StowedDeg target.
+        Angle physicalStowed = Constants.IntakeConstants.PivotHighSetpoint;
+        if (!Utils.isSimulation()) {
+            var status = IntakePivotMotor.setPosition(physicalStowed, 0.25);
+            System.out.println("IntakePivot re-zeroed to " + physicalStowed.in(Degrees) + " deg: " + status);
+        }
+        positionLost = false;
+        lastArmAngleDeg = Double.NaN; // the reading is about to jump to the seed value
+        goToSetpoint(getStowedSetpoint());
+    }
+
     public boolean isAtSetpoint(){
         return target.isNear(getPosition(), Degrees.of(toleranceDeg.get()));
     }
 
     
     private double armAngle = 0.0;
+
+    // position-lost detection (see FourBarSubsystem)
+    private static final double kJumpDegPerLoop = 40.0; // the intake cannot swing this far in one 20 ms loop (about 12 deg at full speed)
+    private double lastArmAngleDeg = Double.NaN;
+    private boolean positionLost = false;
+
+    public boolean isPositionLost() {
+        return positionLost;
+    }
+
+    /** Test hook: pretends the position was lost. */
+    public void markPositionLostForTesting() {
+        positionLost = true;
+    }
 
     @Override
     public void periodic() {
@@ -413,10 +464,18 @@ public class IntakePivotSubsystem extends SubsystemBase {
         BaseStatusSignal.refreshAll(
             IntakePivotMotorPosition,
             IntakePivotMotorVelocity,
-            IntakePivotMotorTorqueCurrent
+            IntakePivotMotorTorqueCurrent,
+            diagMotorVoltage, diagControlMode, diagForwardSoftLimit, diagReverseSoftLimit, diagUnlicensed
         ); 
 
         armAngle = IntakePivotMotorPosition.getValue().in(Degrees);
+        boolean rebooted = IntakePivotMotor.hasResetOccurred();
+        boolean jumped = !Double.isNaN(lastArmAngleDeg) && Math.abs(armAngle - lastArmAngleDeg) > kJumpDegPerLoop;
+        lastArmAngleDeg = armAngle;
+        if ((rebooted || jumped) && !positionLost) {
+            positionLost = true;
+            DogLog.logFault("IntakePivot position lost (" + (rebooted ? "motor rebooted" : "reading jumped") + "): re-zero the intake");
+        }
         IntakePivotMotorMech2d.setAngle(armAngle);
         
         DogLog.log("Arm/Angle", armAngle); // temp debug
@@ -426,6 +485,14 @@ public class IntakePivotSubsystem extends SubsystemBase {
         double posDeg = armAngle;
         double targetDeg = target.in(Degrees);
         double amps = IntakePivotMotorTorqueCurrent.getValue().in(Amps);
+        TuningTelemetry.put("IntakePivot/Diagnostics/LastSetControlStatus", lastControlStatus.toString());
+        TuningTelemetry.put("IntakePivot/Diagnostics/LastConfigStatus", lastConfigStatus.toString());
+        TuningTelemetry.put("IntakePivot/Diagnostics/MotorControlMode", String.valueOf(diagControlMode.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/AppliedVolts", diagMotorVoltage.getValueAsDouble());
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/ForwardSoftLimitFault", Boolean.TRUE.equals(diagForwardSoftLimit.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/ReverseSoftLimitFault", Boolean.TRUE.equals(diagReverseSoftLimit.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/UnlicensedFeatureInUse", Boolean.TRUE.equals(diagUnlicensed.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/DeviceStatusOk", IntakePivotMotorPosition.getStatus().isOK());
         TuningTelemetry.putLive("IntakePivot/Live/PositionDeg", posDeg);
         TuningTelemetry.putLive("IntakePivot/Live/TargetDeg", targetDeg);
         TuningTelemetry.putLive("IntakePivot/Live/ErrorDeg", targetDeg - posDeg);

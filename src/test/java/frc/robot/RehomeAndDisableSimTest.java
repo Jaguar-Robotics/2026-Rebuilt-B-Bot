@@ -8,25 +8,38 @@ import frc.robot.Handlers.FourBarHandler.FourBarState;
 import frc.robot.Handlers.SuperStructure.SuperStructureState;
 import org.junit.jupiter.api.Test;
 
-/** Re-home from the Back button, and what happens when the robot is disabled mid-sequence. */
+/** The D-pad down zero (disabled only, never drives anything), and what happens when the robot is disabled mid-sequence. */
 class RehomeAndDisableSimTest {
     @Test
-    void backButtonRehomesTheFloorAgainstTheDownStopAndEndsFlat() {
+    void dpadDownZeroIsRefusedWhileEnabledAndNeverDrivesTheFloor() {
         RobotSim sim = RobotSim.get();
-        sim.holdRightTrigger(true); // raise the floor first so the re-home has to drive down to the stop
+        sim.holdRightTrigger(true);
         sim.runUntil(() -> sim.rc.fourBarHandler.getCurrentState() == FourBarState.RAISED, 6);
-        sim.holdRightTrigger(false);
-        sim.run(0.2);
-        sim.pressButton(RobotSim.kBack);
+        double raisedAt = sim.floorRot();
+        sim.pressDpadDown();
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kBack);
-        sim.run(0.3);
-        System.out.printf("[SIM] after Back: floor state %s%n", sim.rc.fourBarHandler.getCurrentState());
-        assertEquals(FourBarState.HOMING, sim.rc.fourBarHandler.getCurrentState(), "should be homing");
-        double done = sim.runUntil(() -> sim.rc.fourBarHandler.getCurrentState() == FourBarState.FLAT, 10);
+        sim.releaseDpad();
         sim.run(1.0);
-        System.out.printf("[SIM] re-home finished in %.1f s, floor at %.4f rot (flat setpoint %.4f)%n", done, sim.floorRot(), FourBarConstants.FlatRot);
-        assertTrue(done > 0, "re-home never finished");
+        System.out.printf("[SIM] D-pad down pressed while enabled: floor %s at %.4f rot (was %.4f), status: %s%n",
+            sim.rc.fourBarHandler.getCurrentState(), sim.floorRot(), raisedAt, RobotSim.ntString("/Tuning/FourBar/Status"));
+        assertEquals(FourBarState.RAISED, sim.rc.fourBarHandler.getCurrentState());
+        assertEquals(raisedAt, sim.floorRot(), 0.01);
+        assertTrue(RobotSim.ntString("/Tuning/FourBar/Status").contains("refused"));
+    }
+
+    @Test
+    void thereIsNoCommandAnywhereThatDrivesTheFloorIntoItsHardStop() {
+        RobotSim sim = RobotSim.get();
+        sim.run(0.5);
+        double worstAmps = 0;
+        for (int i = 0; i < 250; i++) { // 5 s of mashing every button
+            sim.pressDpadDown();
+            sim.pressButton(RobotSim.kA);
+            sim.loop();
+            sim.releaseDpad();
+            worstAmps = Math.max(worstAmps, Math.abs(RobotSim.nt("/Tuning/FourBar/Live/StatorCurrentAmps")));
+        }
+        assertTrue(worstAmps < 15.0, "unexpected current at the floor with nothing commanded: " + worstAmps);
         assertEquals(FourBarConstants.FlatRot, sim.floorRot(), 0.004);
     }
 

@@ -97,6 +97,21 @@ public class SuperStructure extends SubsystemBase {
   }
 
   /** Test hook: stows regardless of what is in the hopper (to get a test robot back to its boot state). */
+  /**
+   * Driver button X: tells the intake pivot that it is physically stowed right now (use it if the intake has lost its position),
+   * then holds it there. Only call this with the intake really stowed against its stop.
+   */
+  public void rezeroIntakeToStowed() {
+    if (!edu.wpi.first.wpilibj.DriverStation.isDisabled()) {
+      // a wrong zero would later drive the intake past its stops, so this is a pit action only
+      stowStatusEntry.setString("Re-zero refused: only works while the robot is DISABLED, with the intake stowed");
+      return;
+    }
+    intakePivotHandler.rezeroToStowed();
+    transitionTo(SuperStructureState.STOWED);
+    stowStatusEntry.setString("Intake position re-zeroed: it is now treated as stowed");
+  }
+
   public void forceStowIgnoringHopper() {
     transitionTo(SuperStructureState.STOWED);
   }
@@ -209,8 +224,19 @@ public class SuperStructure extends SubsystemBase {
     PerfMonitor.lap("Handler.SuperStructure", perfStart);
   }
 
+  /** true if the floor or the intake pivot has lost its zero (motor reboot or a jump in the reading) and needs to be re-zeroed. */
+  public boolean isPositionLost() {
+    return fourBarHandler.isPositionLost() || intakePivotHandler.isPositionLost();
+  }
+
   private void periodicInner() {
     DogLog.log("SuperStructure/DesiredState", desiredState);
+    boolean lost = isPositionLost();
+    TuningTelemetry.put("Warnings/PositionLost", lost);
+    TuningTelemetry.put("Warnings/PositionLostWhere", !lost ? "none"
+        : fourBarHandler.isPositionLost() && intakePivotHandler.isPositionLost() ? "floor AND intake"
+        : fourBarHandler.isPositionLost() ? "floor (zero: robot disabled, floor flat, D-pad down)"
+        : "intake (zero: robot disabled, intake stowed, X)");
 
     // Weigh the hopper whenever the floor is flat and still (this also tracks the fuel coming in during intake).
     if (fourBarHandler.isFlatAndStill()) {

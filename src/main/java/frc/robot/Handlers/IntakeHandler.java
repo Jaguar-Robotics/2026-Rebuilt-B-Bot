@@ -10,6 +10,7 @@ import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
 import frc.robot.tuning.TunableNumber;
 import frc.robot.tuning.Tunables;
+import frc.robot.tuning.TuningMode;
 
 public class IntakeHandler extends SubsystemBase implements StateSubsystem {
 
@@ -42,7 +43,9 @@ public class IntakeHandler extends SubsystemBase implements StateSubsystem {
   private IntakeState desiredState = IntakeState.OFF;
   private IntakeState currentState = IntakeState.OFF;
   /** Creates a new IntakeHandler. */
-  private IntakeHandler() {}
+  private IntakeHandler() {
+    TuningMode.onChange(() -> applyState(currentState)); // safe mode scales the roller speeds
+  }
 
   public static IntakeHandler getInstance(){
     if (instance == null){
@@ -77,20 +80,20 @@ public class IntakeHandler extends SubsystemBase implements StateSubsystem {
   private void applyState(IntakeState state) {
     switch (state) {
         case FAST:
-            intakeSubsystem.set(intakeFast.get());
-            kickerSubsystem.set(kickerFast.get());
+            intakeSubsystem.set(TuningMode.scale(intakeFast.get()));
+            kickerSubsystem.set(TuningMode.scale(kickerFast.get()));
         break;
         case REVFAST:
-            intakeSubsystem.set(intakeRevFast.get());
-            kickerSubsystem.set(kickerRevFast.get());
+            intakeSubsystem.set(TuningMode.scale(intakeRevFast.get()));
+            kickerSubsystem.set(TuningMode.scale(kickerRevFast.get()));
         break;
         case SLOW:
-            intakeSubsystem.set(intakeSlow.get());
-            kickerSubsystem.set(kickerSlow.get());
+            intakeSubsystem.set(TuningMode.scale(intakeSlow.get()));
+            kickerSubsystem.set(TuningMode.scale(kickerSlow.get()));
         break;
         case REVSLOW:
-            intakeSubsystem.set(intakeRevSlow.get());
-            kickerSubsystem.set(kickerRevSlow.get());
+            intakeSubsystem.set(TuningMode.scale(intakeRevSlow.get()));
+            kickerSubsystem.set(TuningMode.scale(kickerRevSlow.get()));
         break;
         case OFF:
             intakeSubsystem.stop();

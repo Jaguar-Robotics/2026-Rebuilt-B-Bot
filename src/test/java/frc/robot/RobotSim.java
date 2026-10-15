@@ -111,6 +111,8 @@ final class RobotSim {
         DriverStationSim.setEnabled(false);
     }
 
+    void pressDpadDown() { DriverStationSim.setJoystickPOV(0, 0, 180); }
+    void releaseDpad() { DriverStationSim.setJoystickPOV(0, 0, -1); }
     void pressButton(int button) { DriverStationSim.setJoystickButton(0, button, true); }
     void releaseButton(int button) { DriverStationSim.setJoystickButton(0, button, false); }
     void holdLeftTrigger(boolean held) { DriverStationSim.setJoystickAxis(0, kSimLeftTrigger, held ? 1.0 : -1.0); }

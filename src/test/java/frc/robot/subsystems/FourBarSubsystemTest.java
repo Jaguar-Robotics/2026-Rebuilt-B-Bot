@@ -40,7 +40,7 @@ class FourBarSubsystemTest {
     private static final double kMaxHoldCurrentFraction = 0.5;
 
     private static final double kLow = FourBarConstants.DownStopRot + FourBarConstants.SoftLimitMarginRot;
-    private static final double kHigh = FourBarConstants.UpStopRot - FourBarConstants.SoftLimitMarginRot;
+    private static final double kHigh = FourBarConstants.UpStopRot - FourBarConstants.UpSoftLimitMarginRot;
 
     enum Load {
         EMPTY(FourBarConstants.MovingMassEmptyKg),
@@ -248,25 +248,33 @@ class FourBarSubsystemTest {
     }
 
     @ParameterizedTest @EnumSource(Load.class)
-    void rehomeResetsPositionToTheDownStop(Load load) {
+    void zeroHereFixesALostZeroWithoutMovingTheFloorButOnlyWhenDisabled(Load load) {
         load(load);
-        // Link physically sits raised but the encoder zero has been lost (reads somewhere else).
-        goToAndSettle(FourBarConstants.RaisedRot);
-        fourBar.corruptPositionForTesting(FourBarConstants.FlatRot + 0.1);
+        step(1.0); // the floor sits flat on its stop
+        double linkBefore = fourBar.getSimAngleRot();
+        fourBar.corruptPositionForTesting(FourBarConstants.FlatRot + 0.1); // the encoder zero has been lost
         step(0.1);
         assertEquals(FourBarConstants.FlatRot + 0.1, pos(), 0.01, "test setup: encoder should now be wrong");
-        Command c = fourBar.rehome();
-        c.schedule();
-        double t = runUntil(() -> !c.isScheduled(), FourBarConstants.HomingTimeoutSeconds + 1);
-        System.out.printf("[FourBar] %s re-home finished in %.2f s%n", load, t);
-        assertTrue(t >= 0, "re-home never finished");
-        assertTrue(t < FourBarConstants.HomingTimeoutSeconds - 0.1, "re-home ended by timeout, not stall detection");
+
+        // enabled: refused, nothing changes (a wrong zero mid-match would drive the floor past its up stop)
+        assertFalse(fourBar.zeroHere(), "zeroing must be refused while the robot is enabled");
+        assertEquals(FourBarConstants.FlatRot + 0.1, pos(), 0.01, "a refused zero must not change the position");
+
+        // disabled: zeroes, and does not drive the link anywhere
+        DriverStationSim.setEnabled(false);
+        DriverStationSim.notifyNewData();
+        edu.wpi.first.wpilibj.DriverStation.refreshData();
+        assertTrue(fourBar.zeroHere(), "zeroing should work while disabled and still");
+        step(0.1);
+        assertEquals(FourBarConstants.DownStopRot, pos(), 0.002, "position should now read the down stop");
         assertEquals(FourBarConstants.FlatRot, fourBar.getTarget().in(Rotations), 1e-9);
-        assertTrue(runUntil(fourBar::atSetpoint, 4.0) >= 0, "did not settle flat after re-home: pos " + pos() + " sim "
-            + fourBar.getSimAngleRot() + " vel " + fourBar.getVelocity() + " target " + fourBar.getTarget());
-        assertEquals(FourBarConstants.FlatRot, fourBar.getSimAngleRot(), 0.002, "link not back down");
-        assertEquals(FourBarConstants.FlatRot, pos(), 0.002, "position not reset");
+        DriverStationSim.setEnabled(true);
+        DriverStationSim.notifyNewData();
+        edu.wpi.first.wpilibj.DriverStation.refreshData();
+        step(1.0);
+        assertEquals(linkBefore, fourBar.getSimAngleRot(), 0.004, "zeroing must not move the floor");
         goToAndSettle(FourBarConstants.RaisedRot); // and it still works afterwards
+        assertTrue(fourBar.getSimAngleRot() < FourBarConstants.UpStopRot - 0.005, "must stay clear of the up stop");
     }
 
     @org.junit.jupiter.api.Test

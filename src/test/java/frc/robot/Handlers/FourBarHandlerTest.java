@@ -101,23 +101,26 @@ class FourBarHandlerTest {
         assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.RAISED, 3.0));
     }
 
-    @Test
-    void homingIsNotARequestableState() {
-        handler.setDesiredState(FourBarState.HOMING);
-        assertEquals(FourBarState.FLAT, handler.getDesiredState());
+    @ParameterizedTest @EnumSource(Load.class)
+    void zeroHereIsRefusedWhileEnabledAndNeverMovesTheFloor(Load load) {
+        handler.setSimMassKgForTesting(load.massKg);
+        assertReaches(FourBarState.RAISED, FourBarConstants.RaisedRot);
+        Command c = handler.zeroHere();
+        c.schedule();
+        CommandScheduler.getInstance().run();
+        double before = handler.getAngleRot();
+        runUntil(() -> false, 1.0);
+        assertEquals(FourBarState.RAISED, handler.getCurrentState(), "a refused zero must leave the floor raised");
+        assertEquals(before, handler.getAngleRot(), 0.01);
     }
 
     @ParameterizedTest @EnumSource(Load.class)
-    void rehomeEndsFlat(Load load) {
+    void raisedSetpointStaysWellClearOfTheUpStop(Load load) {
         handler.setSimMassKgForTesting(load.massKg);
         assertReaches(FourBarState.RAISED, FourBarConstants.RaisedRot);
-        Command c = handler.rehome();
-        c.schedule();
-        CommandScheduler.getInstance().run();
-        assertEquals(FourBarState.HOMING, handler.getCurrentState());
-        assertTrue(runUntil(() -> !c.isScheduled(), FourBarConstants.HomingTimeoutSeconds + 1));
-        assertTrue(runUntil(() -> handler.getCurrentState() == FourBarState.FLAT, 3.0), "not FLAT after re-home");
-        assertEquals(FourBarConstants.FlatRot, handler.getAngleRot(), FourBarConstants.PositionToleranceRot);
+        runUntil(() -> false, 1.0);
+        assertTrue(FourBarConstants.UpStopRot - handler.getAngleRot() > 0.01,
+            "raised floor is only " + (FourBarConstants.UpStopRot - handler.getAngleRot()) + " rot from the up stop");
     }
 
     @org.junit.jupiter.api.Test

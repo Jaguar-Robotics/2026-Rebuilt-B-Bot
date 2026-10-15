@@ -7,7 +7,7 @@ tab) and edit values; they apply to the motors immediately, are clamped to safe 
 | Folder | What's in it |
 |---|---|
 | `Safety/` | **SafeMode** (turn on before testing a new gain: caps current, slows motions), SafeCurrentLimitAmps, SafeSpeedScale |
-| `FourBar/Gains` `Motion` `Setpoints` `Tolerance` `Limits` `Homing` | kP kI kD kS kV kA kG, Motion Magic, FlatRot/RaisedRot, tolerances, current limit, soft-limit margin, re-home |
+| `FourBar/Gains` `Motion` `Setpoints` `Tolerance` `Limits` | kP kI kD kS kV kA kG, Motion Magic, FlatRot/RaisedRot, tolerances, current limit, soft-limit margins |
 | `FourBar/3D` | the floor linkage dimensions used to draw it in AdvantageScope |
 | `IntakePivot/Gains` `Motion` `Setpoints` `Limits` `Tolerance` | same idea in degrees; `UseArmCosineGravity` switches kG to the cosine model |
 | `IntakePivot/3D` | pivot point, CAD angle, direction, hopper slide travel |
@@ -33,7 +33,7 @@ tab) and edit values; they apply to the motors immediately, are clamped to safe 
 - **Reset**: `/Tuning/Actions/ResetAllToDefaults` puts everything back to the code. `Status/ValuesChangedFromCode` counts how many differ.
 
 ## Suggested order for the 4-bar
-1. Turn on `Safety/SafeMode`. Re-home. Check `FlatRot`/`RaisedRot` and the soft limits.
+1. Turn on `Safety/SafeMode`. Check `FlatRot`/`RaisedRot` and the soft limits. If the floor lost its position, put it by hand flat on its down stop, DISABLE the robot, and press D-pad down (or the "FourBar Zero Here" button): it re-seeds the position and drives nothing.
 2. Set **kG** (use the suggestion), then **kV**, then **kP/kD** with the square wave running. Watch `Result/Advice`.
 3. Turn SafeMode off and raise cruise velocity / acceleration until it is as fast as is safe.
 4. Repeat with a full hopper; note how kG changes (a loaded gain slot may be worth adding).
