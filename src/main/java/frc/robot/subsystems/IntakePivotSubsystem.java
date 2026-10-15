@@ -38,8 +38,77 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.util.Color8Bit;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Translation3d;
 import frc.robot.Constants;
+import frc.robot.Visualizer;
+import frc.robot.tuning.PerfMonitor;
+import frc.robot.tuning.MoveMetrics;
+import frc.robot.tuning.TunableBoolean;
+import frc.robot.tuning.TunableNumber;
+import frc.robot.tuning.Tunables;
+import frc.robot.tuning.TuningMode;
+import frc.robot.tuning.TuningTelemetry;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
+import com.ctre.phoenix6.configs.SoftwareLimitSwitchConfigs;
+import com.ctre.phoenix6.signals.GravityTypeValue;
+import edu.wpi.first.wpilibj.Timer;
+import java.util.ArrayList;
+import java.util.List;
 public class IntakePivotSubsystem extends SubsystemBase {
+    // ---------------------------------------------------------------- live-tunable values (/Tuning/IntakePivot/...)
+    private final List<Object> tunables = new ArrayList<>();
+    private <T> T track(T t) {
+        tunables.add(t);
+        return t;
+    }
+
+    private static final double kLowDeg = Constants.IntakeConstants.PivotLowSetpoint.in(Degrees);
+    private static final double kHighDeg = Constants.IntakeConstants.PivotHighSetpoint.in(Degrees);
+
+    // gains (the starting values are the ones that were hard-coded here)
+    private final TunableNumber kP = track(Tunables.number("IntakePivot/Gains/kP", 40.0, 0, 5000, "IntakeConstants.PivotkP", v -> applyGains()));
+    private final TunableNumber kI = track(Tunables.number("IntakePivot/Gains/kI", 0.0, 0, 500, "IntakeConstants.PivotkI", v -> applyGains()));
+    private final TunableNumber kD = track(Tunables.number("IntakePivot/Gains/kD", 0.1, 0, 500, "IntakeConstants.PivotkD", v -> applyGains()));
+    private final TunableNumber kS = track(Tunables.number("IntakePivot/Gains/kS", 0.0, 0, 3, "IntakeConstants.PivotkS", v -> applyGains()));
+    private final TunableNumber kV = track(Tunables.number("IntakePivot/Gains/kV", 0.0, 0, 60, "IntakeConstants.PivotkV", v -> applyGains()));
+    private final TunableNumber kA = track(Tunables.number("IntakePivot/Gains/kA", 0.0, 0, 20, "IntakeConstants.PivotkA", v -> applyGains()));
+    private final TunableNumber kG = track(Tunables.number("IntakePivot/Gains/kG", 0.2, 0, 6, "IntakeConstants.PivotkG", v -> applyGains()));
+    /** false = constant gravity term (how this has always run); true = kG scaled by cos(angle), the usual arm model. */
+    private final TunableBoolean armCosineGravity = track(Tunables.bool("IntakePivot/Gains/UseArmCosineGravity", false,
+        "IntakeConstants.PivotArmCosineGravity", v -> applyGains()));
+    // Motion Magic profile (mechanism rotations per second)
+    private final TunableNumber cruiseVelocity = track(Tunables.number("IntakePivot/Motion/CruiseVelocityRotPerSec", 30.0, 0.05, 60, "IntakeConstants.PivotCruiseVelocity", v -> applyMotionMagic()));
+    private final TunableNumber acceleration = track(Tunables.number("IntakePivot/Motion/AccelerationRotPerSecSq", 60.0, 0.1, 400, "IntakeConstants.PivotAcceleration", v -> applyMotionMagic()));
+    private final TunableNumber jerk = track(Tunables.number("IntakePivot/Motion/JerkRotPerSecCubed", 600.0, 0, 5000, "IntakeConstants.PivotJerk", v -> applyMotionMagic()));
+    // setpoints and limits, degrees (0 = deployed, 120 = stowed)
+    private final TunableNumber deployedDeg = track(Tunables.number("IntakePivot/Setpoints/DeployedDeg", kLowDeg, kLowDeg, kHighDeg, "IntakeConstants.PivotLowSetpoint"));
+    private final TunableNumber stowedDeg = track(Tunables.number("IntakePivot/Setpoints/StowedDeg", kHighDeg, kLowDeg, kHighDeg, "IntakeConstants.PivotHighSetpoint"));
+    private final TunableNumber feedDeg = track(Tunables.number("IntakePivot/Setpoints/FeedDeg",
+        Constants.IntakeConstants.PivotFeedSetpoint.in(Degrees), kLowDeg, kHighDeg, "IntakeConstants.PivotFeedSetpoint"));
+    private final TunableNumber softLimitLowDeg = track(Tunables.number("IntakePivot/Limits/SoftLimitLowDeg", kLowDeg, kLowDeg - 10, kHighDeg, null, v -> applyLimits()));
+    private final TunableNumber softLimitHighDeg = track(Tunables.number("IntakePivot/Limits/SoftLimitHighDeg", kHighDeg, kLowDeg, kHighDeg + 10, null, v -> applyLimits()));
+    /** 0 = no stator current limit (how this has always run). */
+    private final TunableNumber statorCurrentLimit = track(Tunables.number("IntakePivot/Limits/StatorCurrentAmps", 0.0, 0, 120, null, v -> applyLimits()));
+    private final TunableNumber toleranceDeg = track(Tunables.number("IntakePivot/Tolerance/PositionDeg", 2.0, 0.1, 15, null));
+    // 3D visualization
+    private final TunableNumber vizPivotX = track(Tunables.number("IntakePivot/3D/PivotX", Constants.IntakeConstants.PivotXMeters, -1, 1, "IntakeConstants.PivotXMeters"));
+    private final TunableNumber vizPivotZ = track(Tunables.number("IntakePivot/3D/PivotZ", Constants.IntakeConstants.PivotZMeters, 0, 1, "IntakeConstants.PivotZMeters"));
+    private final TunableNumber vizCadAngleDeg = track(Tunables.number("IntakePivot/3D/CadAngleDeg", Constants.IntakeConstants.CadPoseAngle.in(Degrees), -180, 180, null));
+    private final TunableNumber vizDirection = track(Tunables.number("IntakePivot/3D/Direction", -1.0, -1, 1, null));
+    private final TunableNumber vizHopperTravel = track(Tunables.number("IntakePivot/3D/HopperSlideTravelMeters",
+        Constants.IntakeConstants.HopperSlideTravelMeters, -1, 1, "IntakeConstants.HopperSlideTravelMeters"));
+
+    private final MoveMetrics moveMetrics = new MoveMetrics();
+    private int movesMeasured = 0;
+    private final Runnable reapplyForSafeMode = () -> {
+        applyMotionMagic();
+        applyLimits();
+    };
+
     /** Position setpoints for the elevator. */
 
     /** The position target of the setpoint in angular units. */
@@ -58,12 +127,20 @@ public class IntakePivotSubsystem extends SubsystemBase {
 
 
     /* leader and follower motors */
-    private final TalonFX IntakePivotMotor = new TalonFX(Constants.IntakeConstants.IntakePivotMotorID, Constants.UpperCanBus);
+    private final TalonFX IntakePivotMotor = new TalonFX(Constants.IntakeConstants.IntakePivotMotorID, Constants.DriveBus);
 
     /* device status signals */
     private final StatusSignal<Angle> IntakePivotMotorPosition = IntakePivotMotor.getPosition(false);
     private final StatusSignal<AngularVelocity> IntakePivotMotorVelocity = IntakePivotMotor.getVelocity(false);
     private final StatusSignal<Current> IntakePivotMotorTorqueCurrent = IntakePivotMotor.getTorqueCurrent(false);
+    // diagnostics: what the motor itself reports (published under /Tuning/IntakePivot/Diagnostics)
+    private final StatusSignal<edu.wpi.first.units.measure.Voltage> diagMotorVoltage = IntakePivotMotor.getMotorVoltage(false);
+    private final StatusSignal<com.ctre.phoenix6.signals.ControlModeValue> diagControlMode = IntakePivotMotor.getControlMode(false);
+    private final StatusSignal<Boolean> diagForwardSoftLimit = IntakePivotMotor.getFault_ForwardSoftLimit(false);
+    private final StatusSignal<Boolean> diagReverseSoftLimit = IntakePivotMotor.getFault_ReverseSoftLimit(false);
+    private final StatusSignal<Boolean> diagUnlicensed = IntakePivotMotor.getFault_UnlicensedFeatureInUse(false);
+    private com.ctre.phoenix6.StatusCode lastControlStatus = com.ctre.phoenix6.StatusCode.OK;
+    private com.ctre.phoenix6.StatusCode lastConfigStatus = com.ctre.phoenix6.StatusCode.OK;
 
     /* controls used by the leader motors */
     private final MotionMagicVoltage setpointRequest = new MotionMagicVoltage(0);
@@ -94,6 +171,7 @@ public class IntakePivotSubsystem extends SubsystemBase {
     );
 
     private static final double kSimLoopPeriod = 0.002; // 2 ms
+    private static final double kMaxSimStepSeconds = 0.01;
     private Notifier simNotifier = null;
     private double lastSimTime = 0.0;
 
@@ -131,11 +209,31 @@ public class IntakePivotSubsystem extends SubsystemBase {
 
     public IntakePivotSubsystem() {
 
+
+        if (!Utils.isSimulation()) {
+            IntakePivotMotorConfigs.MotorOutput.Inverted = Constants.IntakeConstants.PivotInverted
+                ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
+                : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        }
+        IntakePivotMotorConfigs.Slot0 = slot0();
+        IntakePivotMotorConfigs.MotionMagic = motionMagicConfigs();
+        IntakePivotMotorConfigs.SoftwareLimitSwitch = softLimits();
+        IntakePivotMotorConfigs.CurrentLimits = currentLimits();
+        TuningMode.onChange(reapplyForSafeMode);
+
         for (int i = 0; i < kNumConfigAttempts; ++i) {
             var status = IntakePivotMotor.getConfigurator().apply(IntakePivotMotorConfigs);
+            lastConfigStatus = status;
             if (status.isOK()) break;
         }
 
+
+        // The TalonFX encoder reads 0 at power-up, which would be "fully deployed" (0 deg). The robot boots with the intake stowed, so tell
+        // the motor that is where it is; otherwise "deploy" is already satisfied and the intake never moves. (The sim reports absolute angles.)
+        if (!Utils.isSimulation()) {
+            var seedStatus = IntakePivotMotor.setPosition(Constants.IntakeConstants.PivotHighSetpoint, 0.25);
+            System.out.println("IntakePivot (ID " + Constants.IntakeConstants.IntakePivotMotorID + " on bus " + Constants.DriveBus + "): config " + lastConfigStatus + ", position seed " + seedStatus);
+        }
 
         // Create the ligament representing the arm, attach it to the root
         IntakePivotMotorMech2d = mech2dRoot.append(
@@ -160,6 +258,81 @@ public class IntakePivotSubsystem extends SubsystemBase {
         if (Utils.isSimulation()) {
             startSimThread();
         }
+    }
+
+    // ---------------------------------------------------------------- applying tuned values to the motor
+
+    private Slot0Configs slot0() {
+        Slot0Configs c = new Slot0Configs();
+        c.kP = kP.get();
+        c.kI = kI.get();
+        c.kD = kD.get();
+        c.kS = kS.get();
+        c.kV = kV.get();
+        c.kA = kA.get();
+        c.kG = kG.get();
+        c.GravityType = armCosineGravity.get() ? GravityTypeValue.Arm_Cosine : GravityTypeValue.Elevator_Static;
+        return c;
+    }
+
+    private MotionMagicConfigs motionMagicConfigs() {
+        MotionMagicConfigs c = new MotionMagicConfigs();
+        c.MotionMagicCruiseVelocity = TuningMode.scale(cruiseVelocity.get());
+        c.MotionMagicAcceleration = TuningMode.scale(acceleration.get());
+        c.MotionMagicJerk = TuningMode.scale(jerk.get());
+        return c;
+    }
+
+    private SoftwareLimitSwitchConfigs softLimits() {
+        SoftwareLimitSwitchConfigs c = new SoftwareLimitSwitchConfigs();
+        c.ForwardSoftLimitEnable = true;
+        c.ForwardSoftLimitThreshold = softLimitHighDeg.get() / 360.0;
+        c.ReverseSoftLimitEnable = true;
+        c.ReverseSoftLimitThreshold = softLimitLowDeg.get() / 360.0;
+        return c;
+    }
+
+    private CurrentLimitsConfigs currentLimits() {
+        CurrentLimitsConfigs c = new CurrentLimitsConfigs();
+        double amps = TuningMode.limitAmps(statorCurrentLimit.get() <= 0 ? Double.MAX_VALUE : statorCurrentLimit.get());
+        c.StatorCurrentLimitEnable = amps < Double.MAX_VALUE;
+        c.StatorCurrentLimit = c.StatorCurrentLimitEnable ? amps : 120.0;
+        return c;
+    }
+
+    private void applyGains() {
+        IntakePivotMotor.getConfigurator().apply(slot0(), 0.05);
+    }
+
+    private void applyMotionMagic() {
+        IntakePivotMotor.getConfigurator().apply(motionMagicConfigs(), 0.05);
+    }
+
+    private void applyLimits() {
+        IntakePivotMotor.getConfigurator().apply(softLimits(), 0.05);
+        IntakePivotMotor.getConfigurator().apply(currentLimits(), 0.05);
+    }
+
+    /** Setpoints as tuned (the handler uses these). */
+    public Angle getDeployedSetpoint() {
+        return Degrees.of(deployedDeg.get());
+    }
+
+    public Angle getStowedSetpoint() {
+        return Degrees.of(stowedDeg.get());
+    }
+
+    public Angle getFeedSetpoint() {
+        return Degrees.of(feedDeg.get());
+    }
+
+    public Angle getTarget() {
+        return target;
+    }
+
+    /** Clamps an angle inside the (tunable) soft limits. */
+    public Angle clampToLimits(Angle angle) {
+        return Degrees.of(edu.wpi.first.math.MathUtil.clamp(angle.in(Degrees), softLimitLowDeg.get(), softLimitHighDeg.get()));
     }
 
     /**
@@ -200,9 +373,10 @@ public class IntakePivotSubsystem extends SubsystemBase {
      * @param target The target angle (motor rotations) to drive to
      */
     public void goToSetpoint(Angle target) {
+        target = clampToLimits(target);
         this.target = target;
         setpointRequest.withPosition(target);
-        IntakePivotMotor.setControl(setpointRequest);
+        lastControlStatus = IntakePivotMotor.setControl(setpointRequest);
         System.out.print(target.in(Radians));
     }
 
@@ -241,27 +415,126 @@ public class IntakePivotSubsystem extends SubsystemBase {
     }
     */
 
+    /**
+     * Tells the motor the intake is at the stowed angle right now, and holds it there. Real robot only: the sim reports true angles
+     * and never loses position.
+     */
+    public void rezeroToStowed() {
+        // The physical stowed angle is a fixed reference (the stow hard stop), not the tunable StowedDeg target.
+        Angle physicalStowed = Constants.IntakeConstants.PivotHighSetpoint;
+        if (!Utils.isSimulation()) {
+            var status = IntakePivotMotor.setPosition(physicalStowed, 0.25);
+            System.out.println("IntakePivot re-zeroed to " + physicalStowed.in(Degrees) + " deg: " + status);
+        }
+        positionLost = false;
+        lastArmAngleDeg = Double.NaN; // the reading is about to jump to the seed value
+        goToSetpoint(getStowedSetpoint());
+    }
+
     public boolean isAtSetpoint(){
-        return target.isNear(getPosition(), Degrees.of(2));
+        return target.isNear(getPosition(), Degrees.of(toleranceDeg.get()));
     }
 
     
     private double armAngle = 0.0;
 
+    // position-lost detection (see FourBarSubsystem)
+    private static final double kJumpDegPerLoop = 40.0; // the intake cannot swing this far in one 20 ms loop (about 12 deg at full speed)
+    private double lastArmAngleDeg = Double.NaN;
+    private boolean positionLost = false;
+
+    public boolean isPositionLost() {
+        return positionLost;
+    }
+
+    /** Test hook: pretends the position was lost. */
+    public void markPositionLostForTesting() {
+        positionLost = true;
+    }
+
     @Override
     public void periodic() {
+        long perfStart = PerfMonitor.now();
+        periodicInner();
+        PerfMonitor.lap("Sub.IntakePivot", perfStart);
+    }
+
+    private void periodicInner() {
         /* refresh all status signals */
         BaseStatusSignal.refreshAll(
             IntakePivotMotorPosition,
             IntakePivotMotorVelocity,
-            IntakePivotMotorTorqueCurrent
+            IntakePivotMotorTorqueCurrent,
+            diagMotorVoltage, diagControlMode, diagForwardSoftLimit, diagReverseSoftLimit, diagUnlicensed
         ); 
 
         armAngle = IntakePivotMotorPosition.getValue().in(Degrees);
+        boolean rebooted = IntakePivotMotor.hasResetOccurred();
+        boolean jumped = !Double.isNaN(lastArmAngleDeg) && Math.abs(armAngle - lastArmAngleDeg) > kJumpDegPerLoop;
+        lastArmAngleDeg = armAngle;
+        if ((rebooted || jumped) && !positionLost) {
+            positionLost = true;
+            DogLog.logFault("IntakePivot position lost (" + (rebooted ? "motor rebooted" : "reading jumped") + "): re-zero the intake");
+        }
         IntakePivotMotorMech2d.setAngle(armAngle);
         
         DogLog.log("Arm/Angle", armAngle); // temp debug
         DogLog.log("Arm/target", target);
+
+        double now = Timer.getFPGATimestamp();
+        double posDeg = armAngle;
+        double targetDeg = target.in(Degrees);
+        double amps = IntakePivotMotorTorqueCurrent.getValue().in(Amps);
+        TuningTelemetry.put("IntakePivot/Diagnostics/LastSetControlStatus", lastControlStatus.toString());
+        TuningTelemetry.put("IntakePivot/Diagnostics/LastConfigStatus", lastConfigStatus.toString());
+        TuningTelemetry.put("IntakePivot/Diagnostics/MotorControlMode", String.valueOf(diagControlMode.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/AppliedVolts", diagMotorVoltage.getValueAsDouble());
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/ForwardSoftLimitFault", Boolean.TRUE.equals(diagForwardSoftLimit.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/ReverseSoftLimitFault", Boolean.TRUE.equals(diagReverseSoftLimit.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/UnlicensedFeatureInUse", Boolean.TRUE.equals(diagUnlicensed.getValue()));
+        TuningTelemetry.putLive("IntakePivot/Diagnostics/DeviceStatusOk", IntakePivotMotorPosition.getStatus().isOK());
+        TuningTelemetry.putLive("IntakePivot/Live/PositionDeg", posDeg);
+        TuningTelemetry.putLive("IntakePivot/Live/TargetDeg", targetDeg);
+        TuningTelemetry.putLive("IntakePivot/Live/ErrorDeg", targetDeg - posDeg);
+        TuningTelemetry.putLive("IntakePivot/Live/VelocityDegPerSec", IntakePivotMotorVelocity.getValue().in(DegreesPerSecond));
+        TuningTelemetry.putLive("IntakePivot/Live/TorqueCurrentAmps", amps);
+        TuningTelemetry.putLive("IntakePivot/Live/AtSetpoint", isAtSetpoint());
+        moveMetrics.update(now, posDeg, targetDeg, amps, toleranceDeg.get()).ifPresent(r -> {
+            movesMeasured++;
+            TuningTelemetry.put("IntakePivot/Result/MovesMeasured", movesMeasured);
+            TuningTelemetry.put("IntakePivot/Result/DistanceDeg", r.distance());
+            TuningTelemetry.put("IntakePivot/Result/SettleSeconds", r.settleSeconds());
+            TuningTelemetry.put("IntakePivot/Result/OvershootDeg", r.overshoot());
+            TuningTelemetry.put("IntakePivot/Result/SteadyStateErrorDeg", r.steadyStateError());
+            TuningTelemetry.put("IntakePivot/Result/PeakTorqueCurrentAmps", r.peakCurrentAmps());
+            TuningTelemetry.put("IntakePivot/Result/Settled", r.settled());
+            TuningTelemetry.put("IntakePivot/Result/Advice", MoveMetrics.advise(r, toleranceDeg.get(), 1.5));
+        });
+
+        Visualizer.setIntake(getIntakePose(IntakePivotMotorPosition.getValue(), vizPivotX.get(), vizPivotZ.get(), Degrees.of(vizCadAngleDeg.get()), vizDirection.get()));
+        Visualizer.setHopperSlide(getHopperSlidePose(IntakePivotMotorPosition.getValue(), vizHopperTravel.get()));
+    }
+
+    /**
+     * Pose of the intake for AdvantageScope: rotated about (pivotX, pivotZ) by (angle - cadAngle) * direction, with the
+     * pivot point held fixed. direction = -1 swings the intake up and back as the angle increases (negative pitch).
+     */
+    static Pose3d getIntakePose(Angle pivotAngle, double pivotX, double pivotZ, Angle cadAngle, double direction) {
+        double rotatedRad = direction * pivotAngle.minus(cadAngle).in(Radians);
+        Translation3d pivot = new Translation3d(pivotX, Constants.IntakeConstants.PivotYMeters, pivotZ);
+        Rotation3d rotation = new Rotation3d(0, rotatedRad, 0);
+        return new Pose3d(pivot.minus(pivot.rotateBy(rotation)), rotation);
+    }
+
+    /**
+     * The slidy hopper is linked to the intake: fully out (the CAD pose) with the intake deployed, retracted straight back
+     * by travelMeters with the intake stowed, following the pivot angle in between. Visualization only.
+     */
+    static Pose3d getHopperSlidePose(Angle pivotAngle, double travelMeters) {
+        double low = Constants.IntakeConstants.PivotLowSetpoint.in(Radians);
+        double high = Constants.IntakeConstants.PivotHighSetpoint.in(Radians);
+        double fraction = edu.wpi.first.math.MathUtil.clamp((pivotAngle.in(Radians) - low) / (high - low), 0.0, 1.0);
+        return new Pose3d(new Translation3d(-travelMeters * fraction, 0.0, 0.0), new Rotation3d());
     }
 
     private void startSimThread() {
@@ -274,7 +547,8 @@ public class IntakePivotSubsystem extends SubsystemBase {
         simNotifier = new Notifier(() -> {
             /* Calculate the time delta */
             final double currentTime = Utils.getCurrentTimeSeconds();
-            final double deltaTime = currentTime - lastSimTime;
+            // Cap the step: if this thread is starved (a busy machine) one huge step could throw the mechanism sim off.
+            final double deltaTime = Math.min(currentTime - lastSimTime, kMaxSimStepSeconds);
             lastSimTime = currentTime;
 
             final var IntakePivotMotorSim = IntakePivotMotor.getSimState();

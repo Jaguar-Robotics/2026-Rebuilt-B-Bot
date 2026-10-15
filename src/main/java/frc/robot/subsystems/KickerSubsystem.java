@@ -17,8 +17,8 @@ import frc.robot.Constants;
 public class KickerSubsystem extends SubsystemBase {
   /** Creates a new ExampleSubsystem. */
   double targetSpeed = 0.0;
-  private final TalonFX kickerLeaderMotor = new TalonFX(Constants.KickerConstants.KickerLeaderID, Constants.UpperCanBus);
-  private final TalonFX KickerFollowerMotor = new TalonFX(Constants.KickerConstants.KickerFollowerID, Constants.UpperCanBus);
+  private final TalonFX kickerLeaderMotor = new TalonFX(Constants.KickerConstants.KickerLeaderID, Constants.DriveBus);
+  private final TalonFX KickerFollowerMotor = new TalonFX(Constants.KickerConstants.KickerFollowerID, Constants.DriveBus);
 
   private final TalonFXConfigurator kickerLeadeConfigurator = kickerLeaderMotor.getConfigurator();
   private final TalonFXConfigurator kickerfollowerConfigurator = KickerFollowerMotor.getConfigurator();
@@ -27,7 +27,13 @@ public class KickerSubsystem extends SubsystemBase {
 
 
   public KickerSubsystem() {
-    KickerFollowerMotor.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
+    KickerFollowerMotor.setControl(new Follower(Constants.KickerConstants.KickerLeaderID, MotorAlignmentValue.Opposed));
+
+    // flip KickerConstants.LeaderInverted if the kicker spins the wrong way for a positive (feed) speed
+    kickerLeadeConfigurator.apply(new com.ctre.phoenix6.configs.MotorOutputConfigs().withInverted(
+        Constants.KickerConstants.LeaderInverted
+            ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
+            : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive));
 
     limitConfigs.SupplyCurrentLimit = 60;
     limitConfigs.SupplyCurrentLimitEnable = true;

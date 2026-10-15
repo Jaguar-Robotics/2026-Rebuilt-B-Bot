@@ -17,10 +17,10 @@ import frc.robot.Constants;
 public class IntakeSubsystem extends SubsystemBase {
   /** Creates a new ExampleSubsystem. */
   double targetSpeed = 0.0;
-  private final TalonFX intakeLeaderMotor = new TalonFX(Constants.IntakeConstants.IntakeLeaderID, Constants.UpperCanBus);
-  private final TalonFX intakeFollowerMotor = new TalonFX(Constants.IntakeConstants.IntakefollowerID, Constants.UpperCanBus);
-  private final TalonFX intakeReversedMotor = new TalonFX(Constants.IntakeConstants.ReversedIntakeID, Constants.UpperCanBus);
-  private final TalonFX intakeReversedMotorTwo = new TalonFX(Constants.IntakeConstants.ReversedIntakeID2, Constants.UpperCanBus);
+  private final TalonFX intakeLeaderMotor = new TalonFX(Constants.IntakeConstants.IntakeLeaderID, Constants.DriveBus);
+  private final TalonFX intakeFollowerMotor = new TalonFX(Constants.IntakeConstants.IntakefollowerID, Constants.DriveBus);
+  private final TalonFX intakeReversedMotor = new TalonFX(Constants.IntakeConstants.ReversedIntakeID, Constants.DriveBus);
+  private final TalonFX intakeReversedMotorTwo = new TalonFX(Constants.IntakeConstants.ReversedIntakeID2, Constants.DriveBus);
 
   private final TalonFXConfigurator intakeLeaderConfigurator = intakeLeaderMotor.getConfigurator();
   private final TalonFXConfigurator intakeFollowerMotorConfigurator = intakeFollowerMotor.getConfigurator();
@@ -35,7 +35,7 @@ public class IntakeSubsystem extends SubsystemBase {
     intakeReversedMotor.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
     intakeReversedMotorTwo.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
 
-    limitConfigs.SupplyCurrentLimit = 60;
+    limitConfigs.SupplyCurrentLimit = 50;
     limitConfigs.SupplyCurrentLimitEnable = true;
 
     intakeLeaderConfigurator.apply(limitConfigs);
