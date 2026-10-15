@@ -17,6 +17,8 @@ import com.pathplanner.lib.path.GoalEndState;
 import com.pathplanner.lib.path.IdealStartingState;
 import com.pathplanner.lib.path.PathConstraints;
 import com.pathplanner.lib.path.PathPlannerPath;
+
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -41,6 +43,8 @@ import frc.robot.Handlers.SuperStructure;
 import frc.robot.Handlers.SuperStructure.SuperStructureState;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Vision;
+import frc.robot.util.*;
 
 public class RobotContainer {
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
@@ -58,6 +62,7 @@ public class RobotContainer {
     private final SimAwareXboxController joystick = new SimAwareXboxController(0); // normal Xbox controller on the robot; remaps axes in sim
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+    public final Vision vision = new Vision(drivetrain);
     private final Telemetry logger = new Telemetry(MaxSpeed);
     public final SuperStructure superStructure = SuperStructure.getInstance(); //creates a new SuperStructure; try to create all handlers in superstructure and each of their subsystems in their handlers, but like sometimes that wont work so its whateva
 
@@ -116,9 +121,9 @@ public class RobotContainer {
         drivetrain.setDefaultCommand(
             // Drivetrain will execute this command periodically
             drivetrain.applyRequest(() ->
-                drive.withVelocityX(-joystick.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                    .withVelocityY(-joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                    .withRotationalRate(-joystick.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
+                drive.withVelocityX(JoystickDriveUtil.scaleAxis(MathUtil.applyDeadband(-joystick.getLeftY(), 0.1)) * MaxSpeed) // Drive forward with negative Y (forward)
+                    .withVelocityY(JoystickDriveUtil.scaleAxis(MathUtil.applyDeadband(-joystick.getLeftX(), 0.1)) * MaxSpeed) // Drive left with negative X (left)
+                    .withRotationalRate(MathUtil.applyDeadband(-joystick.getRightX(), 0.1) * MaxAngularRate) // Drive counterclockwise with negative X (left)
             )
         );
 

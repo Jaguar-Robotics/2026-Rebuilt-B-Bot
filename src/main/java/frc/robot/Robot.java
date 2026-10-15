@@ -6,10 +6,14 @@ package frc.robot;
 
 import com.ctre.phoenix6.HootAutoReplay;
 
+import dev.doglog.DogLog;
 import edu.wpi.first.math.util.Units;
 import frc.robot.tuning.PerfMonitor;
 import frc.robot.tuning.Tunables;
+import frc.robot.util.HubShiftUtil;
+import frc.robot.util.HubShiftUtil.ShiftInfo;
 import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 
@@ -55,25 +59,16 @@ public class Robot extends TimedRobot {
         m_robotContainer.logInputs();
         t = PerfMonitor.lap("Loop.LogInputs", t);
 
-        /*
-         * This example of adding Limelight is very simple and may not be sufficient for on-field use.
-         * Users typically need to provide a standard deviation that scales with the distance to target
-         * and changes with number of tags available.
-         *
-         * This example is sufficient to show that vision integration is possible, though exact implementation
-         * of how to use vision should be tuned per-robot and to the team's specification.
-         */
-        if (kUseLimelight) {
-            var driveState = m_robotContainer.drivetrain.getState();
-            double headingDeg = driveState.Pose.getRotation().getDegrees();
-            double omegaRps = Units.radiansToRotations(driveState.Speeds.omegaRadiansPerSecond);
 
-            LimelightHelpers.SetRobotOrientation("limelight", headingDeg, 0, 0, 0, 0, 0);
-            var llMeasurement = LimelightHelpers.getBotPoseEstimate_wpiBlue_MegaTag2("limelight");
-            if (llMeasurement != null && llMeasurement.tagCount > 0 && Math.abs(omegaRps) < 2.0) {
-                m_robotContainer.drivetrain.addVisionMeasurement(llMeasurement.pose, llMeasurement.timestampSeconds);
-            }
-        }
+        ShiftInfo official = HubShiftUtil.getOfficialShiftInfo();
+
+        // Official shift info 
+        DogLog.log("Shift/Official/CurrentShift",   official.currentShift().toString());
+        DogLog.log("Shift/Official/RemainingTime", Math.round(official.remainingTime()*10)/10.0);
+        DogLog.log("Shift/Official/ElapsedTime",   Math.round(official.elapsedTime()*10)/10.0);
+        DogLog.log("Shift/Official/MatchTime",        HubShiftUtil.getMatchTime());
+        DogLog.log("Shift/Official/Active",        official.active());
+    
     }
 
     @Override
