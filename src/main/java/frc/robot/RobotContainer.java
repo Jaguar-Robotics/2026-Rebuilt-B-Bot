@@ -13,6 +13,7 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.FollowPathCommand;
+import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.path.GoalEndState;
 import com.pathplanner.lib.path.IdealStartingState;
 import com.pathplanner.lib.path.PathConstraints;
@@ -26,6 +27,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -38,6 +40,9 @@ import frc.robot.Handlers.IntakePivotHandler;
 import frc.robot.tuning.TunableNumber;
 import frc.robot.tuning.Tunables;
 import frc.robot.tuning.TuningTelemetry;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import frc.robot.Handlers.SuperStructure;
 import frc.robot.Handlers.SuperStructure.SuperStructureState;
@@ -68,6 +73,11 @@ public class RobotContainer {
 
     public final FourBarHandler fourBarHandler = FourBarHandler.getInstance();
 
+    public final Field2d field = new Field2d();
+    private String previewedAuto = null;
+    private boolean previewedRed = false;
+
+
     /** Fuel on the field, simulation only (null on the real robot). */
     private final FuelSimulation fuelSimulation = RobotBase.isSimulation()
         ? new FuelSimulation(drivetrain, superStructure, fourBarHandler) : null;
@@ -80,6 +90,8 @@ public class RobotContainer {
         configurePathPlanner();
 
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
+        SmartDashboard.putData("Field", field);
+
 
         SmartDashboard.putData("Auto Mode", autoChooser);
 
@@ -411,6 +423,41 @@ public class RobotContainer {
         } else {
             superStructure.setDesiredState(SuperStructureState.IDLE);
         }
+    }
+
+    /** Call every loop (cheap). Redraws the preview only when the selected auto or alliance changes. */
+    public void updateAutoPreview() {
+        field.setRobotPose(drivetrain.getState().Pose);
+
+            // Hide the preview once teleop starts, and keep it hidden
+        if (DriverStation.isTeleopEnabled()) {
+            if (previewedAuto != null) {
+                previewedAuto = null;
+                field.getObject("Auto Preview").setPoses(new ArrayList<Pose2d>());
+                field.getObject("Active Path").setPoses(new ArrayList<Pose2d>());
+                field.getObject("Target Pose").setPoses(new ArrayList<Pose2d>());
+            }
+            return;
+        }
+
+        Command selected = autoChooser.getSelected();
+        String name = (selected == null) ? "" : selected.getName();
+        boolean red = DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue) == DriverStation.Alliance.Red;
+
+        if (name.equals(previewedAuto) && red == previewedRed) return;
+        previewedAuto = name;
+        previewedRed = red;
+
+        List<Pose2d> poses = new ArrayList<>();
+        try {
+            for (PathPlannerPath path : PathPlannerAuto.getPathGroupFromAutoFile(name)) {
+                if (red) path = path.flipPath();
+                poses.addAll(path.getPathPoses());
+            }
+        } catch (Exception e) {
+            // "None", a missing file, etc.: just show nothing
+        }
+        field.getObject("Auto Preview").setPoses(poses);
     }
 
     public Command getAutonomousCommand() {

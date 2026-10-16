@@ -42,6 +42,7 @@ public class Robot extends TimedRobot {
     public void robotPeriodic() {
         long loopStartNanos = PerfMonitor.now();
         robotPeriodicInner();
+        m_robotContainer.updateAutoPreview();
         PerfMonitor.endLoop(loopStartNanos);
     }
 
