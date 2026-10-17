@@ -314,11 +314,6 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         return leaderStatorCurrent.getValue();
     }
 
-    /** Average stator current magnitude of the two motors; at a standstill this is the holding current against gravity. */
-    public double getHoldCurrentAmps() {
-        return (Math.abs(leaderStatorCurrent.getValue().in(Amps)) + Math.abs(followerStatorCurrent.getValue().in(Amps))) / 2.0;
-    }
-
     public Current getFollowerStatorCurrent() {
         return followerStatorCurrent.getValue();
     }

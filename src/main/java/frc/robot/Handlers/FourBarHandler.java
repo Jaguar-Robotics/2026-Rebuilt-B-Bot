@@ -16,6 +16,9 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.tuning.PerfMonitor;
 import frc.robot.subsystems.FourBarSubsystem;
+import frc.robot.tuning.TunableNumber;
+import frc.robot.tuning.Tunables;
+import frc.robot.tuning.TuningMode;
 import frc.robot.tuning.TuningTelemetry;
 import frc.robot.util.MechanismInterlock;
 
@@ -45,9 +48,36 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
     return instance;
   }
 
+  // ---- manual jog (D-pad up / down): moves the floor a little at a time while the button is held, in case of a jam
+  /** Jog speed in rotations per second (scaled down in safe mode). */
+  private final TunableNumber manualRate = Tunables.number("Manual/FloorRotPerSec", 0.08, 0.01, 0.25, null);
+  /** The jog target never runs further than this ahead of where the floor really is, so a jam cannot wind the target up. */
+  private static final double kManualMaxLeadRot = 0.012;
+  private boolean manual = false;
+
+  /**
+   * Manual override: nudges the floor up (direction +1) or down (-1) for one 20 ms loop. It cannot hurt the robot: the target is clamped to the
+   * soft limits (which sit inside both hard stops), it only creeps a short way ahead of the real position, the floor cannot be jogged up
+   * unless the intake is down and clear of it, and safe mode slows it. When the button is released the floor holds where it is; the next
+   * state request takes over again.
+   */
+  public void manualJog(int direction, double dtSeconds) {
+    double pos = getAngleRot();
+    double target = fourBarSubsystem.getTarget().in(Rotations);
+    double next = target + Math.signum(direction) * TuningMode.scale(manualRate.get()) * dtSeconds;
+    next = Math.max(pos - kManualMaxLeadRot, Math.min(pos + kManualMaxLeadRot, next));
+    if (!MechanismInterlock.get().floorMayRaise(IntakePivotHandler.getInstance().getPositionDeg())) {
+        next = Math.min(next, fourBarSubsystem.getFlatRot()); // the intake is in the way: no lifting
+    }
+    manual = true;
+    fourBarSubsystem.setTarget(Rotations.of(next)); // clamps to the soft limits
+    TuningTelemetry.put("FourBar/Status", "Manual jog");
+  }
+
   @Override
   public void setDesiredState(State state){
-        if (state instanceof FourBarState fourBarState && desiredState != fourBarState) {
+        if (state instanceof FourBarState fourBarState && (manual || desiredState != fourBarState)) {
+        manual = false;
         desiredState = fourBarState;
 
         handleStateTransition();
@@ -120,21 +150,12 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
       return desiredState;
   }
 
-  /** true when the floor is flat and not moving, so its holding current reflects only the weight on it. */
-  public boolean isFlatAndStill() {
-      return currentState == FourBarState.FLAT && fourBarSubsystem.atSetpoint();
-  }
-
   public boolean isPositionLost() {
       return fourBarSubsystem.isPositionLost();
   }
 
   public void markPositionLostForTesting() {
       fourBarSubsystem.markPositionLostForTesting();
-  }
-
-  public double getHoldCurrentAmps() {
-      return fourBarSubsystem.getHoldCurrentAmps();
   }
 
   public double getAngleRot() {
@@ -176,6 +197,7 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
 
   /** If a setpoint is edited in Elastic while the floor is in that state, move to the new position right away. */
   private void followTunedSetpoints() {
+    if (manual) return; // the driver is holding the floor where they put it
     double want = effectiveTarget(desiredState);
     if (Math.abs(fourBarSubsystem.getTarget().in(Rotations) - want) > 1e-9) {
         fourBarSubsystem.setTarget(Rotations.of(want));

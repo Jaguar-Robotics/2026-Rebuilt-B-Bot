@@ -137,64 +137,16 @@ class TuningSimTest {
         Path file = Path.of(edu.wpi.first.wpilibj.Filesystem.getOperatingDirectory().getPath(), "tuned-constants.txt");
         Files.deleteIfExists(file);
         setNt("/Tuning/FourBar/Gains/kP", 321.0);
-        setNt("/Tuning/Outpost/PulseIntervalSeconds", 4.5);
+        setNt("/Tuning/Outpost/PulseOffSeconds", 4.5);
         sim.run(0.4);
         press("/Tuning/Actions/PrintTunedConstants");
         sim.run(0.4);
         String dump = RobotSim.ntString("/Tuning/Status/TunedConstants");
         System.out.printf("[SIM] dump:%n%s%n", dump);
         assertTrue(dump.contains("public static final double kP = 321.0;"));
-        assertTrue(dump.contains("PulseIntervalSeconds = 4.5;"));
+        assertTrue(dump.contains("PulseOffSeconds = 4.5;"));
         assertTrue(Files.exists(file), "tuned-constants.txt should be written");
         Files.deleteIfExists(file);
-    }
-
-    @Test
-    void liftWhenBelowBallsDecidesHowFullTheHopperIsBeforeTheFloorLifts() {
-        RobotSim sim = RobotSim.get();
-        var fuel = sim.rc.getFuelSimulation();
-        int lowThreshold = liftCount(sim, fuel, 30);
-        int highThreshold = liftCount(sim, fuel, 150);
-        System.out.printf("[SIM] floor lifted with %d balls left when LiftWhenBelowBalls=30, and %d when it was 150%n", lowThreshold, highThreshold);
-        assertTrue(lowThreshold < 45, "a low threshold waits for the hopper to drain (lifted at " + lowThreshold + ")");
-        assertTrue(highThreshold > 120, "a high threshold lifts early (lifted at " + highThreshold + ")");
-        assertTrue(lowThreshold < highThreshold - 60);
-    }
-
-    private int liftCount(RobotSim sim, FuelSimulation fuel, double liftWhenBelowBalls) {
-        sim.holdRightTrigger(false);
-        sim.runUntil(() -> sim.rc.fourBarHandler.getCurrentState() == FourBarState.FLAT, 6);
-        setNt("/Tuning/Hopper/LiftWhenBelowBalls", liftWhenBelowBalls);
-        fuel.setHopperCountForTesting(160);
-        sim.run(3.0);
-        sim.holdRightTrigger(true);
-        int[] at = {-1};
-        sim.runUntil(() -> {
-            if (sim.rc.fourBarHandler.getDesiredState() == FourBarState.RAISED && at[0] < 0) at[0] = fuel.getHopperCount();
-            return at[0] >= 0;
-        }, 12);
-        sim.holdRightTrigger(false);
-        sim.runUntil(() -> sim.rc.fourBarHandler.getCurrentState() == FourBarState.FLAT, 8);
-        return at[0];
-    }
-
-    @Test
-    void calibrateButtonsSetTheEmptyAndFullCurrentsFromTheLiveReading() {
-        RobotSim sim = RobotSim.get();
-        var fuel = sim.rc.getFuelSimulation();
-        fuel.setHopperCountForTesting(0);
-        sim.run(3.0);
-        press("/Tuning/Hopper/Actions/SetEmptyToCurrentReading");
-        sim.run(0.3);
-        double empty = RobotSim.nt("/Tuning/Hopper/EmptyHoldCurrentAmps");
-        fuel.setHopperCountForTesting(160);
-        sim.run(3.0);
-        press("/Tuning/Hopper/Actions/SetFullToCurrentReading");
-        sim.run(0.3);
-        double full = RobotSim.nt("/Tuning/Hopper/FullHoldCurrentAmps");
-        System.out.printf("[SIM] calibrated: empty %.2f A, full %.2f A (sim physics: about 2.5 and 18.9)%n", empty, full);
-        assertEquals(2.5, empty, 0.6);
-        assertEquals(18.9, full, 2.5);
     }
 
     @org.junit.jupiter.api.AfterEach

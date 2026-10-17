@@ -16,6 +16,7 @@ final class RobotSim {
     static final int kLeftBumper = SimAwareXboxController.SIM_BUTTON_LEFT_BUMPER;
     static final int kBack = SimAwareXboxController.SIM_BUTTON_BACK;
     static final int kA = SimAwareXboxController.SIM_BUTTON_A;
+    static final int kStart = SimAwareXboxController.SIM_BUTTON_START;
     // Sim controller axis indices (see SimAwareXboxController): triggers rest at -1 and the two are swapped in the sim GUI.
     static final int kSimLeftTrigger = SimAwareXboxController.SIM_LEFT_TRIGGER;
     static final int kSimRightTrigger = SimAwareXboxController.SIM_RIGHT_TRIGGER;
@@ -53,7 +54,7 @@ final class RobotSim {
         frc.robot.tuning.Tunables.resetAllToDefaults();
         frc.robot.tuning.TuningMode.safeMode.set(false);
         if (rc.getFuelSimulation() != null) {
-            rc.getFuelSimulation().setHopperCountForTesting(0);
+            setHopperBalls(0);
             rc.getFuelSimulation().clearFieldForTesting();
         }
         run(0.3); // lets released triggers fire their idle transitions first
@@ -74,6 +75,7 @@ final class RobotSim {
         releaseEverything();
         robot = new Robot();
         rc = robot.getRobotContainer();
+        frc.robot.util.MechanismInterlock.get(); // create its tunables now, so the first reset covers them (they used to appear after it and keep a stale saved value)
     }
 
     void releaseEverything() {
@@ -110,6 +112,31 @@ final class RobotSim {
     void disable() {
         DriverStationSim.setEnabled(false);
     }
+
+    /** Puts n balls in the simulated hopper (the fuel simulation only: the robot does not count balls). */
+    void setHopperBalls(int n) {
+        rc.getFuelSimulation().setHopperCountForTesting(n);
+    }
+
+    static final int kY = SimAwareXboxController.SIM_BUTTON_Y;
+
+    /** Deploys the intake (the floor cannot lift into a stowed one), lets go of the trigger, and presses Y to raise the floor. */
+    void raiseFloor() {
+        holdLeftTrigger(true);
+        runUntil(() -> intakeAngleDeg() < 5.0, 5);
+        holdLeftTrigger(false);
+        run(0.3);
+        pressButton(kY);
+        run(0.1);
+        releaseButton(kY);
+        runUntil(() -> rc.fourBarHandler.getCurrentState() == frc.robot.Handlers.FourBarHandler.FourBarState.RAISED, 8);
+    }
+
+    /** The outpost feed starts when both bumpers are pressed at once. */
+    void pressBothBumpers() { pressButton(kLeftBumper); pressButton(kRightBumper); }
+    void releaseBothBumpers() { releaseButton(kLeftBumper); releaseButton(kRightBumper); }
+
+    void pressPov(int degrees) { DriverStationSim.setJoystickPOV(0, 0, degrees); } // 0 up, 90 right, 180 down, 270 left
 
     void pressDpadDown() { DriverStationSim.setJoystickPOV(0, 0, 180); }
     void releaseDpad() { DriverStationSim.setJoystickPOV(0, 0, -1); }
@@ -151,13 +178,21 @@ final class RobotSim {
     private void checkInterlock() {
         double intakeDeg = frc.robot.Handlers.IntakePivotHandler.getInstance().getPositionDeg();
         double floorRot = rc.fourBarHandler.getAngleRot();
+        history.addLast(String.format("t=%.2f intake=%.1f (target %.1f) floor=%.4f (target %.4f) super=%s floorDesired=%s", Timer.getFPGATimestamp() % 1000, intakeDeg,
+            nt("/Tuning/IntakePivot/Live/TargetDeg"), floorRot, nt("/Tuning/FourBar/Live/TargetRot"), rc.superStructure.getDesiredState(), rc.fourBarHandler.getDesiredState()));
+        if (history.size() > 60) history.removeFirst();
         boolean intakeInTheWay = intakeDeg > Constants.InterlockConstants.IntakeClearBelowDeg + 5.0;
         boolean floorUp = floorRot > Constants.InterlockConstants.FloorCountsAsFlatBelowRot + 0.006;
         if (intakeInTheWay && floorUp && frc.robot.Handlers.IntakePivotHandler.getInstance() != null && interlockEnabled()) {
-            if (interlockViolations == 0) firstInterlockViolation = String.format("intake %.1f deg with floor at %.4f rot", intakeDeg, floorRot);
+            if (interlockViolations == 0) { System.out.println("[VIOLATION HISTORY]"); history.forEach(h -> System.out.println("   " + h)); }
+            if (interlockViolations == 0) firstInterlockViolation = String.format("intake %.1f deg with floor at %.4f rot [super %s, floor desired %s, floor target %.4f, intake target %.1f, floor vel %.3f]",
+                intakeDeg, floorRot, rc.superStructure.getDesiredState(), rc.fourBarHandler.getDesiredState(), nt("/Tuning/FourBar/Live/TargetRot"),
+                nt("/Tuning/IntakePivot/Live/TargetDeg"), nt("/Tuning/FourBar/Live/VelocityRotPerSec"));
             interlockViolations++;
         }
     }
+
+    private final java.util.ArrayDeque<String> history = new java.util.ArrayDeque<>();
 
     private boolean interlockEnabled() {
         return edu.wpi.first.networktables.NetworkTableInstance.getDefault().getEntry("/Tuning/Interlock/Enabled").getBoolean(true);

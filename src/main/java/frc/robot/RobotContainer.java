@@ -133,8 +133,8 @@ public class RobotContainer {
         drivetrain.setDefaultCommand(
             // Drivetrain will execute this command periodically
             drivetrain.applyRequest(() ->
-                drive.withVelocityX(JoystickDriveUtil.scaleAxis(MathUtil.applyDeadband(-joystick.getLeftY(), 0.1)) * MaxSpeed) // Drive forward with negative Y (forward)
-                    .withVelocityY(JoystickDriveUtil.scaleAxis(MathUtil.applyDeadband(-joystick.getLeftX(), 0.1)) * MaxSpeed) // Drive left with negative X (left)
+                drive.withVelocityX(JoystickDriveUtil.scaleAxis(MathUtil.applyDeadband(-joystick.getLeftY(), 0.1)) * MaxSpeed * driveSpeedScale()) // Drive forward with negative Y (forward)
+                    .withVelocityY(JoystickDriveUtil.scaleAxis(MathUtil.applyDeadband(-joystick.getLeftX(), 0.1)) * MaxSpeed * driveSpeedScale()) // Drive left with negative X (left)
                     .withRotationalRate(MathUtil.applyDeadband(-joystick.getRightX(), 0.1) * MaxAngularRate) // Drive counterclockwise with negative X (left)
             )
         );
@@ -161,25 +161,30 @@ public class RobotContainer {
         */
 
         // Reset the field-centric heading on left bumper press.
-        joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
+        joystick.start().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric)); // Start (the small right button) re-seeds the field-centric heading
         
         drivetrain.registerTelemetry(logger::telemeterize);
 
         //EVERYTHING ABOVE IS PREGENERATED, EVERTHING BELOW IS MY CODE WOOO
         //in pressing the A button on the controller, set superstructure state to STATE1
-        // Hold left trigger: intake. Hold right trigger: outtake. Release both: idle (rollers off, floor flat, intake stays where it is).
-        // (Left bumper no longer stows; it only re-seeds the field-centric heading above.)
+        // Hold left trigger: intake. Hold right trigger: outtake. Release both: idle (rollers off, intake and floor stay where they are).
+        // Left trigger = intake. Right trigger = outtake (rollers only: the floor is not touched). Y toggles the hopper floor.
         joystick.leftTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)));
         joystick.rightTrigger().onTrue(new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.POOP)));
         joystick.leftTrigger().onFalse(new InstantCommand(this::idleOrKeepHeldState));
         joystick.rightTrigger().onFalse(new InstantCommand(this::idleOrKeepHeldState));
-        // A: stow the intake. Only works when the hopper is empty or nearly empty; otherwise it buzzes the controller and nothing moves.
-        joystick.a().onTrue(stowIntakeButton());
+        // Back: stow the intake. Only do this with the hopper empty: pulling the intake in against a full hopper can stall the pivot motor.
+        joystick.back().onTrue(stowIntakeButton()); // Back (the small left button)
+        // Y: toggle the hopper floor. Down -> all the way up; up -> down. (It waits for the intake to be down before lifting.)
+        joystick.y().onTrue(new InstantCommand(superStructure::toggleFloor));
         // X: re-zero the intake pivot (only press it with the intake physically stowed against its stop, e.g. if the intake lost its position)
         joystick.x().onTrue(new InstantCommand(superStructure::rezeroIntakeToStowed).ignoringDisable(true));
 
-        // Press right bumper once: drive to the outpost, then keep feeding it on its own. Press again to cancel and stow.
-        joystick.rightBumper().toggleOnTrue(outpostFeedCommand());
+        // Press BOTH bumpers at once: drive to the outpost, then keep feeding it on its own. Press both again to cancel (the intake stays where it is).
+        joystick.leftBumper().and(joystick.rightBumper()).toggleOnTrue(outpostFeedCommand());
+
+        // A: toggle the drive speed between 80% (normal) and 100% (turbo). While intaking it is always 75%. Shown on the dashboard under Drive/.
+        joystick.a().onTrue(new InstantCommand(() -> turboDrive = !turboDrive).ignoringDisable(true));
 
         // If the floor or intake lose their zero (a motor rebooted, or the reading jumped), warn the driver with a long rumble.
         new edu.wpi.first.wpilibj2.command.button.Trigger(superStructure::isPositionLost).onTrue(
@@ -187,13 +192,21 @@ public class RobotContainer {
                               () -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 0.0)).withTimeout(1.5).ignoringDisable(true));
 
         // 4-bar (temporary test bindings; the floor normally follows the SuperStructure states above)
-        joystick.povDown().onTrue(fourBarHandler.zeroHere()); // D-pad down. Disabled only: floor resting flat on its down stop
+        // D-pad down while DISABLED: zero the floor (resting flat on its down stop). While enabled, D-pad down is the manual floor jog below.
+        joystick.povDown().and(RobotModeTriggers.disabled()).onTrue(fourBarHandler.zeroHere());
+
+        // Manual overrides for jams (enabled only; held = keep moving, released = hold). Soft limits, the intake/floor interlock and
+        // safe mode all still apply, so these cannot drive anything into a stop or into each other.
+        joystick.povLeft().whileTrue(Commands.run(() -> IntakePivotHandler.getInstance().manualJog(-1, 0.02)).withName("Intake jog: deploy"));
+        joystick.povRight().whileTrue(Commands.run(() -> IntakePivotHandler.getInstance().manualJog(+1, 0.02)).withName("Intake jog: stow"));
+        joystick.povUp().whileTrue(Commands.run(() -> fourBarHandler.manualJog(+1, 0.02)).withName("Floor jog: up"));
+        joystick.povDown().and(RobotModeTriggers.disabled().negate()).whileTrue(Commands.run(() -> fourBarHandler.manualJog(-1, 0.02)).withName("Floor jog: down"));
         SmartDashboard.putData("FourBar Raise", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.RAISED)).ignoringDisable(true));
         SmartDashboard.putData("FourBar Flat", new InstantCommand(() -> fourBarHandler.setDesiredState(FourBarHandler.FourBarState.FLAT)).ignoringDisable(true));
         SmartDashboard.putData("FourBar Zero Here (disabled only, floor resting flat)", fourBarHandler.zeroHere());
         // Same as left trigger / left bumper, for testing without a controller
         SmartDashboard.putData("Intake Deploy", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.INTAKE)).ignoringDisable(true));
-        SmartDashboard.putData("Intake Stow (only if hopper nearly empty)", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)).ignoringDisable(true));
+        SmartDashboard.putData("Intake Stow (hopper must be empty)", new InstantCommand(() -> superStructure.setDesiredState(SuperStructureState.STOWED)).ignoringDisable(true));
     }
 
     // live-tunable outpost feeding (/Tuning/Outpost/...): read each time the button is pressed
@@ -207,8 +220,9 @@ public class RobotContainer {
     private final TunableNumber outpostMaxAccel = Tunables.number("Outpost/MaxAccelerationMetersPerSecondSq", Constants.OutpostConstants.MaxAccelerationMetersPerSecondSq, 0.2, 10, "OutpostConstants.MaxAccelerationMetersPerSecondSq");
     private final TunableNumber outpostMaxAngVel = Tunables.number("Outpost/MaxAngularVelocityDegreesPerSecond", Constants.OutpostConstants.MaxAngularVelocityDegreesPerSecond, 30, 720, "OutpostConstants.MaxAngularVelocityDegreesPerSecond");
     private final TunableNumber outpostMaxAngAccel = Tunables.number("Outpost/MaxAngularAccelerationDegreesPerSecondSq", Constants.OutpostConstants.MaxAngularAccelerationDegreesPerSecondSq, 30, 1440, "OutpostConstants.MaxAngularAccelerationDegreesPerSecondSq");
-    private final TunableNumber pulseInterval = Tunables.number("Outpost/PulseIntervalSeconds", Constants.OutpostConstants.PulseIntervalSeconds, 0.2, 30, "OutpostConstants.PulseIntervalSeconds");
-    private final TunableNumber pulseDuration = Tunables.number("Outpost/PulseDurationSeconds", Constants.OutpostConstants.PulseDurationSeconds, 0.05, 5, "OutpostConstants.PulseDurationSeconds");
+    private final TunableNumber pulseOff = Tunables.number("Outpost/PulseOffSeconds", Constants.OutpostConstants.PulseOffSeconds, 0.2, 30, "OutpostConstants.PulseOffSeconds");
+    private final TunableNumber pulseOn = Tunables.number("Outpost/PulseOnSeconds", Constants.OutpostConstants.PulseOnSeconds, 0.05, 10, "OutpostConstants.PulseOnSeconds");
+    private final TunableNumber pulsesBeforeFloorRaise = Tunables.number("Outpost/PulsesBeforeFloorRaise", Constants.OutpostConstants.PulsesBeforeFloorRaise, 0, 50, "OutpostConstants.PulsesBeforeFloorRaise");
     // set the robot's field pose from Elastic (the pose starts at 0,0 until an auto or vision sets it): /Tuning/Pose/...
     private final TunableNumber setPoseX = Tunables.number("Pose/SetXMeters", Constants.SimConstants.StartXMeters, 0, 16.5, null);
     private final TunableNumber setPoseY = Tunables.number("Pose/SetYMeters", Constants.SimConstants.StartYMeters, 0, 8.0, null);
@@ -226,12 +240,24 @@ public class RobotContainer {
         // pressed so tuned values are used; the whole thing is flipped automatically for the red alliance.
         Command drive = driveToOutpostWithRetries(Constants.OutpostConstants.MaxApproachAttempts);
 
-        Command feed = Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED))
-            .andThen(Commands.repeatingSequence(
-                Commands.defer(() -> Commands.waitSeconds(pulseInterval.get()), Set.of()),
-                Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED_PULSE)),
-                Commands.defer(() -> Commands.waitSeconds(pulseDuration.get()), Set.of()),
-                Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED))));
+        // At the wall: lift the intake slightly (to the feed angle), then pulse the outtake (on, then off), and raise the hopper floor once
+        // it has pulsed PulsesBeforeFloorRaise times.
+        final int[] pulses = {0};
+        Command liftIntake = Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED))
+            .andThen(Commands.waitUntil(() -> Math.abs(IntakePivotHandler.getInstance().getPositionDeg() - IntakePivotHandler.getInstance().getFeedDeg()) < 3.0)
+                .withTimeout(Constants.OutpostConstants.IntakeLiftTimeoutSeconds));
+        Command onePulse = Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.FEED_PULSE))
+            .andThen(Commands.defer(() -> Commands.waitSeconds(pulseOn.get()), Set.of()))
+            .andThen(Commands.runOnce(() -> {
+                superStructure.setDesiredState(SuperStructureState.FEED);
+                pulses[0]++;
+                TuningTelemetry.put("Outpost/PulsesDone", pulses[0]);
+                if (pulses[0] >= pulsesBeforeFloorRaise.get()) superStructure.raiseFloor();
+            }))
+            .andThen(Commands.defer(() -> Commands.waitSeconds(pulseOff.get()), Set.of()));
+        Command feed = Commands.runOnce(() -> { pulses[0] = 0; TuningTelemetry.put("Outpost/PulsesDone", 0); })
+            .andThen(liftIntake)
+            .andThen(Commands.repeatingSequence(onePulse));
 
         Command couldNotArrive = Commands.runOnce(() -> {
             DogLog.logFault("Outpost feed: did not reach the outpost, giving up");
@@ -251,7 +277,10 @@ public class RobotContainer {
                     < Constants.OutpostConstants.ArrivedToleranceMeters));
 
         return Commands.either(drivesThenFeeds, noPose, () -> poseLooksValid(drivetrain.getState().Pose))
-            .finallyDo(() -> superStructure.stowIfAllowedElseIdle()) // after feeding the hopper is usually empty, so this normally stows
+            .finallyDo(() -> {
+                superStructure.setDesiredState(SuperStructureState.IDLE); // the intake stays where it is; press A to stow it when the hopper is empty
+                fourBarHandler.setDesiredState(FourBarHandler.FourBarState.FLAT); // the outpost feeding raised the floor: put it back
+            })
             .withName("Outpost feed");
     }
 
@@ -373,7 +402,31 @@ public class RobotContainer {
     private String lastPressedRaw = "";
     private long lastButtonMask = -1;
 
+    // ---- drive speed: 80% normally, 75% while intaking, and the Back button toggles 100% / 80% ----
+    private boolean turboDrive = false;
+    private final TunableNumber normalSpeedScale = Tunables.number("Drive/NormalSpeedScale", Constants.DriveSpeedConstants.NormalScale, 0.1, 1.0, "DriveSpeedConstants.NormalScale");
+    private final TunableNumber intakeSpeedScale = Tunables.number("Drive/IntakeSpeedScale", Constants.DriveSpeedConstants.IntakeScale, 0.1, 1.0, "DriveSpeedConstants.IntakeScale");
+    private final TunableNumber turboSpeedScale = Tunables.number("Drive/TurboSpeedScale", Constants.DriveSpeedConstants.TurboScale, 0.1, 1.0, "DriveSpeedConstants.TurboScale");
+
+    private boolean isIntaking() {
+        return superStructure.getDesiredState() == SuperStructureState.INTAKE;
+    }
+
+    /** The fraction of full translation speed the driver gets right now. */
+    private double driveSpeedScale() {
+        if (isIntaking()) return intakeSpeedScale.get();
+        return turboDrive ? turboSpeedScale.get() : normalSpeedScale.get();
+    }
+
+    private void publishDriveSpeed() {
+        double scale = driveSpeedScale();
+        SmartDashboard.putNumber("Drive/SpeedPercent", Math.round(scale * 100.0));
+        SmartDashboard.putBoolean("Drive/TurboOn (A button)", turboDrive);
+        SmartDashboard.putString("Drive/Mode", isIntaking() ? "Intaking (slowed)" : turboDrive ? "TURBO (toggled on)" : "Normal");
+    }
+
     public void logInputs() {
+        publishDriveSpeed();
         // Which raw buttons the driver station sees pressed, 1-based (what the sim GUI numbers them). In simulation this is how
         // you find out which number a physical button has, for the SIM_BUTTON_* table in SimAwareXboxController.
         long mask = DriverStation.getStickButtons(0);
@@ -396,22 +449,11 @@ public class RobotContainer {
         DogLog.log("Controller/RightTriggerPressed", joystick.rightTrigger().getAsBoolean());
     }
 
-    private boolean lastStowRefused = false;
-
-    /** The stow button: stows the intake only if the hopper is (nearly) empty; if refused, buzz the controller. */
+    /** The stow button. Only use it with the hopper empty. */
     private Command stowIntakeButton() {
-        return Commands.runOnce(() -> {
-                int before = superStructure.getStowRefusals();
-                superStructure.setDesiredState(SuperStructureState.STOWED);
-                lastStowRefused = superStructure.getStowRefusals() != before;
-            })
-            .andThen(Commands.either(
-                Commands.startEnd(() -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 1.0),
-                                  () -> joystick.setRumble(edu.wpi.first.wpilibj.GenericHID.RumbleType.kBothRumble, 0.0)).withTimeout(0.4),
-                Commands.none(),
-                () -> lastStowRefused))
+        return Commands.runOnce(() -> superStructure.setDesiredState(SuperStructureState.STOWED))
             .ignoringDisable(true)
-            .withName("Stow intake (only if the hopper is nearly empty)");
+            .withName("Stow intake");
     }
 
     /** Called when a trigger is released: if the other trigger is still held, go to its state, otherwise go idle (intake stays put). */

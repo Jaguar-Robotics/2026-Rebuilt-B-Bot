@@ -12,14 +12,14 @@ tab) and edit values; they apply to the motors immediately, are clamped to safe 
 | `IntakePivot/Gains` `Motion` `Setpoints` `Limits` `Tolerance` | same idea in degrees; `UseArmCosineGravity` switches kG to the cosine model |
 | `IntakePivot/3D` | pivot point, CAD angle, direction, hopper slide travel |
 | `Rollers/Intake` `Rollers/Kicker` | Fast / Slow / RevFast / RevSlow duty cycles |
-| `Hopper/` | **LiftWhenBelowBalls** (how full before the floor lifts), CapacityBalls, floor-weighing calibration (Empty/FullHoldCurrentAmps) with calibrate buttons, fallback timer |
+| `Hopper/` | **OuttakeFloorDelaySeconds** (how long the rollers run before the floor lifts on the right-trigger outtake) |
 | `Outpost/` | outpost pose (X, Y, **heading 180 = facing the wall**), approach distance and speed, drive limits, pulse interval and duration (read each time you press the button) |
 | `FuelSim/` | hopper capacity, robot size, intake pickup box, outtake rate/speed/spawn (sim only) |
 | `Tests/` | SquareWaveDwellSeconds |
 
 ## Read-only things to graph
 - `FourBar/Live/PositionRot` vs `TargetRot` (and ErrorRot, MotorVolts, StatorCurrentAmps); same under `IntakePivot/Live`.
-- `Hopper/Live/EstimatedBalls` vs `LiftThresholdBalls` (how full the hopper is, from the floor's holding current), plus `FilteredHoldCurrentAmps` and `LiftThresholdHoldCurrentAmps`.
+- `Hopper/Live/FloorRaiseAllowed`: true once the floor is allowed to lift (after the delay on the right trigger; at once on the right bumper).
 
 ## The cool tuning aids
 - **Square-wave tests** (SmartDashboard commands in Elastic): `Tuning/FourBar Square Wave` (deploys the intake first, because the floor cannot raise into a stowed intake), `Tuning/IntakePivot Square Wave`.
@@ -39,12 +39,10 @@ tab) and edit values; they apply to the motors immediately, are clamped to safe 
 4. Repeat with a full hopper; note how kG changes (a loaded gain slot may be worth adding).
 5. Press PrintTunedConstants and paste into `Constants.java`.
 
-## Tuning when the floor lifts (floor weighing)
-1. Floor flat and still, hopper **empty**: press `Hopper/Actions/SetEmptyToCurrentReading`.
-2. Fill the hopper completely, floor flat and still: press `Hopper/Actions/SetFullToCurrentReading`. Set `CapacityBalls` to how many balls that is.
-3. Now `Hopper/Live/EstimatedBalls` tracks the load. Set **`Hopper/LiftWhenBelowBalls`** to how many balls may still be in the
-   hopper when the floor is allowed up: a low number waits for the rollers to clear more room, a high number lifts sooner.
-   (`LiftThresholdHoldCurrentAmps` shows the same threshold in amps.)
+## Tuning when the floor lifts
+Right trigger = outtake, and the floor lifts only after `Hopper/OuttakeFloorDelaySeconds` (default 1.5 s) so a packed hopper is not jammed.
+Right bumper = outtake and the floor lifts immediately. Watch a full-hopper outtake and raise the delay until it never jams; lower it
+for a faster outtake. The robot does not count balls.
 
 ## Outpost route
 - The route is made from a field map (`src/main/deploy/pathplanner/navgrid.json`) that blocks both trench lanes, the hub and the towers,

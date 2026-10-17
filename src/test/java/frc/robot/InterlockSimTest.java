@@ -21,12 +21,11 @@ class InterlockSimTest {
     @Test
     void theIntakeCannotPivotUpUntilTheRaisedFloorIsFlat() {
         RobotSim sim = RobotSim.get();
-        sim.holdRightTrigger(true); // outtake: intake down, floor up
-        sim.runUntil(() -> sim.rc.fourBarHandler.getCurrentState() == FourBarState.RAISED, 8);
+        sim.raiseFloor(); // intake down, floor up
         assertEquals(FourBarState.RAISED, sim.rc.fourBarHandler.getCurrentState());
-        sim.pressButton(RobotSim.kA); // the stow button, with the floor still up: everything is told to stow at once (intake up, floor down)
+        sim.pressButton(RobotSim.kBack); // the stow button, with the floor still up: everything is told to stow at once (intake up, floor down)
         sim.run(0.05);
-        sim.releaseButton(RobotSim.kA);
+        sim.releaseButton(RobotSim.kBack);
 
         double maxIntakeWhileFloorUp = 0;
         boolean heldBack = false;
@@ -53,17 +52,18 @@ class InterlockSimTest {
     @Test
     void theFloorWaitsForTheIntakeToComeDownBeforeRaising() {
         RobotSim sim = RobotSim.get();
-        var fuel = sim.rc.getFuelSimulation();
-        fuel.setHopperCountForTesting(5); // few balls: the load check would let the floor raise immediately
         sim.run(2.5);
         double intakeAtFloorRise = -1;
-        sim.holdRightTrigger(true);
+        sim.pressButton(RobotSim.kY); // the floor asks to lift at once, while the intake is still stowed: only the interlock holds it back
+        sim.run(0.1);
+        sim.releaseButton(RobotSim.kY);
+        sim.holdRightTrigger(true); // outtake deploys the intake (and does not touch the floor)
         for (int i = 0; i < 6 * 50; i++) {
             sim.loop();
             if (intakeAtFloorRise < 0 && sim.floorRot() > InterlockConstants.FloorCountsAsFlatBelowRot + 0.01) intakeAtFloorRise = sim.intakeAngleDeg();
         }
         System.out.printf("[INTERLOCK] outtake from stowed: the floor started rising when the intake was at %.1f deg (must be <= %.0f)%n", intakeAtFloorRise, kClear);
-        assertTrue(intakeAtFloorRise > 0, "the floor never raised");
+        assertTrue(intakeAtFloorRise >= 0, "the floor never raised");
         assertTrue(intakeAtFloorRise <= kClear, "the floor started raising while the intake was still in its way (" + intakeAtFloorRise + " deg)");
         assertEquals(FourBarState.RAISED, sim.rc.fourBarHandler.getCurrentState());
         sim.assertNoInterlockViolations();
@@ -72,7 +72,6 @@ class InterlockSimTest {
     @Test
     void mashingTheTriggersAtRandomNeverPutsThemInEachOthersWay() {
         RobotSim sim = RobotSim.get();
-        sim.rc.getFuelSimulation().setHopperCountForTesting(20);
         Random random = new Random(42);
         for (int burst = 0; burst < 45; burst++) {
             sim.holdLeftTrigger(random.nextBoolean());
@@ -83,11 +82,10 @@ class InterlockSimTest {
         sim.assertNoInterlockViolations();
         sim.holdLeftTrigger(false);
         sim.holdRightTrigger(false);
-        sim.rc.getFuelSimulation().setHopperCountForTesting(0); // empty, so the stow button is allowed
         sim.run(2.5);
-        sim.pressButton(RobotSim.kA);
+        sim.pressButton(RobotSim.kBack);
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kA);
+        sim.releaseButton(RobotSim.kBack);
         double done = sim.runUntil(() -> sim.rc.superStructure.getCurrentState() == SuperStructureState.STOWED
             && sim.rc.fourBarHandler.getCurrentState() == FourBarState.FLAT && sim.intakeAngleDeg() > 115, 10);
         assertTrue(done > 0, "after letting go everything should end up stowed (intake " + sim.intakeAngleDeg() + ", floor " + sim.floorRot() + ")");
@@ -98,13 +96,15 @@ class InterlockSimTest {
     void turningTheInterlockOffInElasticOrWideningTheClearAngleChangesWhatIsAllowed() {
         RobotSim sim = RobotSim.get();
         var nt = NetworkTableInstance.getDefault();
-        sim.holdRightTrigger(true);
-        sim.runUntil(() -> sim.rc.fourBarHandler.getCurrentState() == FourBarState.RAISED, 8);
+        sim.raiseFloor();
         nt.getEntry("/Tuning/Interlock/IntakeClearOfFloorBelowDeg").setDouble(110.0); // widen the zone the intake may use with the floor up
-        sim.pressButton(RobotSim.kA); // stow everything at once while the floor is still up
+        sim.pressButton(RobotSim.kBack); // stow everything at once while the floor is still up
         sim.run(0.05);
-        sim.releaseButton(RobotSim.kA);
+        sim.releaseButton(RobotSim.kBack);
         sim.run(0.8);
+        double wentTo = sim.intakeAngleDeg();
+        nt.getEntry("/Tuning/Interlock/IntakeClearOfFloorBelowDeg").setDouble(InterlockConstants.IntakeClearBelowDeg); // put it back: tests share one robot
+        sim.run(0.1); // so the saved (persistent) copy is cleared too
         System.out.printf("[INTERLOCK] clear angle widened to 110 deg: intake went to %.1f deg with the floor still at %.3f rot%n", sim.intakeAngleDeg(), sim.floorRot());
         assertTrue(sim.intakeAngleDeg() > kClear + 5 || sim.floorRot() <= InterlockConstants.FloorCountsAsFlatBelowRot,
             "a wider clear angle should let the intake go further while the floor is still up");

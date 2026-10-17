@@ -40,10 +40,6 @@ public class Constants {
             // retracted by this distance when stowed. TODO: GUESS (checked by eye in the sim: 0.23 stopped a little short).
             public static final double HopperSlideTravelMeters = 0.27;
 
-            // Stowing the intake pulls it in against whatever is in the hopper, which can stall the pivot motor when the hopper is full.
-            // So the stow action only works when the hopper is empty or nearly empty (estimated from the floor's holding current).
-            public static final boolean StowGateEnabled = true;
-            public static final double StowOnlyBelowBalls = 20.0;
 
         }
 
@@ -105,30 +101,15 @@ public class Constants {
             public static final double kV = 12.8;  // ~12 V / (Kraken free speed / reduction) = 12 / (100 rps / 106.667)
             public static final double kA = 0.0;
             public static final double kG = 0.45;  // Arm_Cosine. Re-measured in the sim at 106.667: empty needs ~0.08 V, fully loaded ~0.62 V. Leaning toward loaded so a full floor does not sag toward the down stop. Compromise: empty needs ~0.09 V, fully loaded ~0.7 V (CG at link end). Sim-checked for both with this one slot
-            public static final double CruiseVelocityRotPerSec = 0.30;
-            public static final double AccelerationRotPerSecSq = 1.0;
-            public static final double JerkRotPerSecCubed = 10.0;
+            public static final double CruiseVelocityRotPerSec = 0.22;
+            public static final double AccelerationRotPerSecSq = 0.7;
+            public static final double JerkRotPerSecCubed = 7.0;
 
             // ---- atSetpoint() tolerances (setpoints are only a few thousandths of a rotation from the stops) ----
             // The single compromise kG leaves the empty link ~0.0008 rot off its target at the intake setpoint, so this has
             // to be wider than that. A separate loaded gain slot would let this be tightened.
             public static final double PositionToleranceRot = 0.002;
             public static final double VelocityToleranceRotPerSec = 0.02;
-
-            // ---- Outtake sequencing ----
-            // The floor must not tilt up into a packed hopper or it jams. The load on the floor is estimated from the motors'
-            // holding current with the floor flat: about EmptyHoldCurrentAmps with no fuel, FullHoldCurrentAmps with a full hopper.
-            // TODO: these two are derived from the sim (per motor, at the flat angle); measure them on the robot.
-            public static final double EmptyHoldCurrentAmps = 2.5;
-            public static final double FullHoldCurrentAmps = 18.9;
-            // The floor may go up once the hopper holds fewer than this many balls (so a nearly empty hopper lifts immediately).
-            // A packed hopper waits until the rollers have drained it below this. Tune it in Elastic: /Tuning/Hopper/LiftWhenBelowBalls.
-            public static final double RaiseBelowBalls = 136.0;
-            // If the load signal is not available, raise after this much total outtake time instead. TODO: tune
-            public static final double RaiseFallbackAfterOuttakeSeconds = 2.0;
-            // Even with a valid load signal, never keep the floor down longer than this (a bad calibration must not jam it flat).
-            public static final double RaiseMaxWaitSeconds = 6.0;
-            public static final int LoadFilterSamples = 25; // 0.5 s moving average
 
             // ---- 3D pose for AdvantageScope: the floor is the coupler of the 4-bar, so its pose is solved from the linkage ----
             // Robot coordinates: X forward, Z up, origin on the floor under the robot center. TODO: from the CAD / pictures; check visually.
@@ -172,6 +153,12 @@ public class Constants {
          * Drive-to-outpost and feed. The pose is where the robot's center ends up, in blue-alliance coordinates (flipped for red).
          * The robot arrives FACING THE WALL (the intake is the front), driving straight in from a staging point.
          */
+        public static abstract class DriveSpeedConstants{
+            public static final double NormalScale = 0.80; // driving with nothing going on
+            public static final double IntakeScale = 0.75; // while intaking
+            public static final double TurboScale = 1.00;  // after the Back button toggle
+        }
+
         public static abstract class OutpostConstants{
             public static final double OutpostXMeters = 0.68;       // intake rollers reach ~0.6 m in front of the center: ~8 cm off the wall. TODO: tune
             public static final double OutpostYMeters = 0.65;
@@ -184,12 +171,12 @@ public class Constants {
             public static final double MaxAngularVelocityDegreesPerSecond = 540.0;
             public static final double MaxAngularAccelerationDegreesPerSecondSq = 720.0;
             // The slow straight run into the wall
-            public static final double ApproachVelocityMetersPerSecond = 1.2;
-            public static final double ApproachAccelerationMetersPerSecondSq = 2.0;
+            public static final double ApproachVelocityMetersPerSecond = 1.0;
+            public static final double ApproachAccelerationMetersPerSecondSq = 1.5; // gentle: slows down smoothly into the wall
 
             // Final alignment: after the approach path, creep onto the exact pose (the path follower stops a few centimeters early)
             public static final double AlignKp = 3.0;                  // m/s per meter of error
-            public static final double AlignMaxSpeedMetersPerSecond = 0.5;
+            public static final double AlignMaxSpeedMetersPerSecond = 0.4;
             public static final double AlignHeadingKp = 5.0;           // rad/s per radian of error
             public static final double AlignToleranceMeters = 0.03;
             public static final double AlignToleranceDegrees = 2.0;
@@ -202,8 +189,10 @@ public class Constants {
             public static final double ArrivedToleranceMeters = 0.35;
 
             // Feeding: wait this long, then run the outtake rollers for a short pulse, repeat. TODO: tune
-            public static final double PulseIntervalSeconds = 3.0;
-            public static final double PulseDurationSeconds = 0.5;
+            public static final double PulseOffSeconds = 2.0;          // rollers off between pulses
+            public static final double PulseOnSeconds = 2.0;           // each pulse: rollers run this long
+            public static final int PulsesBeforeFloorRaise = 4;        // the hopper floor lifts after this many pulses
+            public static final double IntakeLiftTimeoutSeconds = 2.0; // wait at most this long for the intake to reach its slightly-raised position
         }
 
         /** Where the robot's pose starts in simulation (blue-alliance field coordinates). The real robot has no pose until an auto or vision sets one. */

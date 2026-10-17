@@ -29,9 +29,9 @@ class OutpostSimTest {
         System.out.printf("[SIM] robot starts at %s%n", start);
         assertTrue(RobotContainer.poseLooksValid(start), "the sim should start the robot somewhere valid on the field");
 
-        sim.pressButton(RobotSim.kRightBumper); // one press...
+        sim.pressBothBumpers(); // one press...
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kRightBumper); // ...and let go: the driver walks away
+        sim.releaseBothBumpers(); // ...and let go: the driver walks away
 
         double arrived = sim.runUntil(() -> sim.rc.superStructure.getCurrentState() == SuperStructureState.FEED, 20);
         Pose2d at = sim.rc.drivetrain.getState().Pose;
@@ -41,27 +41,45 @@ class OutpostSimTest {
         assertEquals(0.65, at.getY(), 0.4);
         assertEquals("Feeding", ntString("Outpost/Status"));
 
-        // Now it should keep pulsing without any input, floor lifting only after the rollers have run.
+        // Now it should lift the intake slightly, pulse 2 s on / 2 s off without any input, and raise the floor after the 4th pulse.
         List<SuperStructureState> seen = new ArrayList<>();
         boolean sawFloorRaised = false, sawRollersReverse = false;
-        for (int i = 0; i < 700; i++) { // 14 s
+        int pulsesWhenFloorRaised = -1;
+        double intakeAtFirstPulse = -1;
+        double firstPulseSeconds = -1, pulseStart = -1;
+        for (int i = 0; i < 30 * 50; i++) { // 30 s
             sim.loop();
             var st = sim.rc.superStructure.getCurrentState();
-            if (seen.isEmpty() || seen.get(seen.size() - 1) != st) seen.add(st);
+            if (seen.isEmpty() || seen.get(seen.size() - 1) != st) {
+                seen.add(st);
+                if (st == SuperStructureState.FEED_PULSE) {
+                    pulseStart = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+                    if (intakeAtFirstPulse < 0) intakeAtFirstPulse = sim.intakeAngleDeg();
+                } else if (pulseStart >= 0 && firstPulseSeconds < 0) {
+                    firstPulseSeconds = edu.wpi.first.wpilibj.Timer.getFPGATimestamp() - pulseStart;
+                }
+            }
             if (st == SuperStructureState.FEED_PULSE && Handlers_intake().getCurrentState() == IntakeState.REVSLOW) sawRollersReverse = true;
-            if (sim.rc.fourBarHandler.getCurrentState() == FourBarState.RAISED) sawFloorRaised = true;
+            if (!sawFloorRaised && sim.rc.fourBarHandler.getDesiredState() == FourBarState.RAISED) {
+                sawFloorRaised = true;
+                pulsesWhenFloorRaised = (int) seen.stream().filter(x -> x == SuperStructureState.FEED_PULSE).count();
+            }
         }
-        System.out.printf("[SIM] states over the next 14 s: %s%n", seen);
+        System.out.printf("[SIM] states over the next 30 s: %s; first pulse lasted %.1f s, intake at %.1f deg at the first pulse, floor raised after %d pulses%n",
+            seen, firstPulseSeconds, intakeAtFirstPulse, pulsesWhenFloorRaised);
         long pulses = seen.stream().filter(x -> x == SuperStructureState.FEED_PULSE).count();
-        assertTrue(pulses >= 3, "expected several pulses in 14 s, saw " + pulses);
+        assertTrue(pulses >= 5, "expected several pulses in 30 s, saw " + pulses);
         assertTrue(sawRollersReverse, "the rollers never reversed during a pulse");
-        assertTrue(sawFloorRaised, "the floor never raised (an empty hopper should raise it right away)");
+        assertEquals(2.0, firstPulseSeconds, 0.2, "a pulse should last 2 s");
+        assertTrue(intakeAtFirstPulse > 5 && intakeAtFirstPulse < 14, "the intake should be slightly raised (about 10 deg) when pulsing starts, was " + intakeAtFirstPulse);
+        assertTrue(sawFloorRaised, "the floor never raised");
+        assertEquals(4, pulsesWhenFloorRaised, "the floor should raise after exactly the 4th pulse");
         assertEquals(0.7, sim.rc.drivetrain.getState().Pose.getX(), 0.4, "it should stay parked at the outpost");
 
-        sim.pressButton(RobotSim.kRightBumper); // second press cancels
+        sim.pressBothBumpers(); // second press cancels
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kRightBumper);
-        double stowed = sim.runUntil(() -> sim.rc.superStructure.getCurrentState() == SuperStructureState.STOWED
+        sim.releaseBothBumpers();
+        double stowed = sim.runUntil(() -> sim.rc.superStructure.getCurrentState() == SuperStructureState.IDLE
             && sim.rc.fourBarHandler.getCurrentState() == FourBarState.FLAT, 6);
         System.out.printf("[SIM] second press stowed everything after %.1f s%n", stowed);
         assertTrue(stowed > 0, "second press should cancel, stow the intake and lower the floor");
@@ -77,15 +95,15 @@ class OutpostSimTest {
         sim.enableTeleop();
         sim.rc.drivetrain.resetPose(new Pose2d(0, 0, Rotation2d.kZero)); // the real robot's pose before anything sets it
         sim.run(0.5);
-        sim.pressButton(RobotSim.kRightBumper);
+        sim.pressBothBumpers();
         sim.run(0.3);
-        sim.releaseButton(RobotSim.kRightBumper);
+        sim.releaseBothBumpers();
         sim.run(0.5);
         System.out.printf("[SIM] status with no pose: %s%n", ntString("Outpost/Status"));
         assertTrue(ntString("Outpost/Status").contains("not on the field"));
         assertFalse("Outpost feed".equals(sim.rc.drivetrain.getCurrentCommand() == null ? "" : sim.rc.drivetrain.getCurrentCommand().getName()),
             "the outpost command should have ended");
-        assertEquals(SuperStructureState.STOWED, sim.rc.superStructure.getCurrentState());
+        assertEquals(SuperStructureState.IDLE, sim.rc.superStructure.getCurrentState());
     }
 
     @Test
@@ -120,8 +138,8 @@ class OutpostSimTest {
         assertEquals(0.7, at.getX(), 0.4);
         assertEquals(0.65, at.getY(), 0.4);
         button.setBoolean(false); // pressing it again in Elastic cancels
-        double stowed = sim.runUntil(() -> sim.rc.superStructure.getCurrentState() == SuperStructureState.STOWED, 6);
-        assertTrue(stowed > 0, "turning the button off should cancel and stow");
+        double stowed = sim.runUntil(() -> sim.rc.superStructure.getCurrentState() == SuperStructureState.IDLE, 6);
+        assertTrue(stowed > 0, "turning the button off should cancel and go idle");
     }
 
     @org.junit.jupiter.api.AfterEach

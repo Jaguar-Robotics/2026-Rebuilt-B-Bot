@@ -35,7 +35,7 @@ public class KickerSubsystem extends SubsystemBase {
             ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
             : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive));
 
-    limitConfigs.SupplyCurrentLimit = 60;
+    limitConfigs.SupplyCurrentLimit = 20;
     limitConfigs.SupplyCurrentLimitEnable = true;
 
     kickerLeadeConfigurator.apply(limitConfigs);

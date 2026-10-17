@@ -39,7 +39,10 @@ class VisualizerSimTest {
         assertEquals(0.0, Math.toDegrees(deployed[0].getRotation().getY()), 3.0, "floor stays flat while intaking");
 
         sim.holdLeftTrigger(false);
-        sim.holdRightTrigger(true);
+        sim.run(0.3);
+        sim.pressButton(RobotSim.kY); // Y raises the floor (the intake is down)
+        sim.run(0.1);
+        sim.releaseButton(RobotSim.kY);
         sim.runUntil(() -> sim.floorRot() > Constants.FourBarConstants.RaisedRot - 0.01, 6);
         sim.run(0.5);
         Pose3d[] raised = poses(sub);

@@ -10,6 +10,9 @@ import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.tuning.TunableNumber;
+import frc.robot.tuning.Tunables;
+import frc.robot.tuning.TuningMode;
 import frc.robot.tuning.TuningTelemetry;
 import frc.robot.util.MechanismInterlock;
 import java.util.Set;
@@ -40,9 +43,32 @@ public class IntakePivotHandler extends SubsystemBase implements StateSubsystem 
     return instance;
   }
 
+  // ---- manual jog (D-pad left / right): moves the intake a little at a time while the button is held, in case of a jam
+  /** Jog speed in degrees per second (scaled down in safe mode). */
+  private final TunableNumber manualRate = Tunables.number("Manual/IntakeDegPerSec", 40.0, 5.0, 90.0, null);
+  /** The jog target never runs further than this ahead of where the intake really is, so a jam cannot wind the target up. */
+  private static final double kManualMaxLeadDeg = 6.0;
+  private boolean manual = false;
+
+  /**
+   * Manual override: nudges the intake toward stowed (direction +1) or deployed (-1) for one 20 ms loop. It cannot hurt the robot: the target is
+   * clamped to the soft limits, it only creeps a short way ahead of the real position, the intake cannot be jogged up into a raised floor
+   * (the same interlock as everything else), and safe mode slows it. When the button is released the intake holds where it is.
+   */
+  public void manualJog(int direction, double dtSeconds) {
+    double pos = getPositionDeg();
+    double target = IntakePivotSubsystem.getTarget().in(Degrees);
+    double next = target + Math.signum(direction) * TuningMode.scale(manualRate.get()) * dtSeconds;
+    next = Math.max(pos - kManualMaxLeadDeg, Math.min(pos + kManualMaxLeadDeg, next));
+    manual = true;
+    applyTarget(Degrees.of(next)); // soft limits and the floor interlock are enforced in here
+    TuningTelemetry.put("IntakePivot/Status", "Manual jog");
+  }
+
   @Override
   public void setDesiredState(State state){
-        if (state instanceof IntakePivotState IntakePivotState && desiredState != IntakePivotState) {
+        if (state instanceof IntakePivotState IntakePivotState && (manual || desiredState != IntakePivotState)) {
+        manual = false;
         desiredState = IntakePivotState;
 
         handleStateTransition();
@@ -97,6 +123,11 @@ public class IntakePivotHandler extends SubsystemBase implements StateSubsystem 
     desiredState = IntakePivotState.STOWED;
   }
 
+  /** The slightly-raised outpost feeding angle (degrees). */
+  public double getFeedDeg() {
+    return IntakePivotSubsystem.getFeedSetpoint().in(Degrees);
+  }
+
   public boolean isPositionLost() {
     return IntakePivotSubsystem.isPositionLost();
   }
@@ -126,6 +157,7 @@ public class IntakePivotHandler extends SubsystemBase implements StateSubsystem 
 
   /** If a setpoint is edited in Elastic while the intake is in that state, move to the new angle right away. */
   private void followTunedSetpoints() {
+    if (manual) return; // the driver is holding the intake where they put it
     Angle want;
     switch (desiredState) {
         case FEED: want = IntakePivotSubsystem.getFeedSetpoint(); break;

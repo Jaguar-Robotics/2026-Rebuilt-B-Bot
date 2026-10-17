@@ -12,9 +12,9 @@ class OutpostRedSimTest {
         sim.enableTeleop();
         sim.run(1.0);
         System.out.printf("[SIM] alliance=%s start pose %s%n", DriverStation.getAlliance(), sim.rc.drivetrain.getState().Pose);
-        sim.pressButton(RobotSim.kRightBumper);
+        sim.pressBothBumpers();
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kRightBumper);
+        sim.releaseBothBumpers();
         for (int i = 0; i < 25; i++) {
             sim.run(1.0);
             Pose2d p = sim.rc.drivetrain.getState().Pose;

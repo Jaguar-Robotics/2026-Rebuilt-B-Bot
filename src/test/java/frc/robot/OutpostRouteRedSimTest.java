@@ -26,9 +26,9 @@ class OutpostRouteRedSimTest {
         RobotSim sim = RobotSim.get(false);
         sim.rc.drivetrain.resetPose(new Pose2d(x, y, Rotation2d.fromDegrees(headingDeg)));
         sim.run(0.5);
-        sim.pressButton(RobotSim.kRightBumper);
+        sim.pressBothBumpers();
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kRightBumper);
+        sim.releaseBothBumpers();
 
         double worst = Double.MAX_VALUE;
         String worstWho = "";
@@ -61,9 +61,9 @@ class OutpostRouteRedSimTest {
         sim.runUntil(() -> sim.intakeAngleDeg() < 20.0, 4);
         sim.run(0.8);
         assertEquals(10.0, sim.intakeAngleDeg(), 5.0);
-        sim.pressButton(RobotSim.kRightBumper);
+        sim.pressBothBumpers();
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kRightBumper);
+        sim.releaseBothBumpers();
         sim.run(1.0);
     }
 

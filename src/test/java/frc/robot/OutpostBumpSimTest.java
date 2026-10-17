@@ -26,9 +26,9 @@ class OutpostBumpSimTest {
         RobotSim sim = RobotSim.get();
         sim.enableTeleop();
         sim.run(0.5);
-        sim.pressButton(RobotSim.kRightBumper);
+        sim.pressBothBumpers();
         sim.run(0.1);
-        sim.releaseButton(RobotSim.kRightBumper);
+        sim.releaseBothBumpers();
 
         Pose2d target = new Pose2d(0.68, 0.65, Rotation2d.k180deg);
         double t = sim.runUntil(() -> sim.rc.drivetrain.getState().Pose.getTranslation().getDistance(target.getTranslation()) < triggerDistance, 20);

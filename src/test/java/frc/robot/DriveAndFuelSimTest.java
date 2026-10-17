@@ -96,17 +96,6 @@ class DriveAndFuelSimTest {
         assertEquals(0, fuel.getHopperCount());
     }
 
-    @Test
-    void collectingFuelAddsWeightThatTheFloorWeighingSees() {
-        RobotSim sim = RobotSim.get();
-        var fuel = sim.rc.getFuelSimulation();
-        fuel.setHopperCountForTesting(80);
-        sim.run(3.0);
-        double balls = RobotSim.nt("/Tuning/Hopper/Live/EstimatedBalls");
-        System.out.printf("[SIM] 80 balls loaded: floor weighing estimates %.0f%n", balls);
-        assertEquals(80, balls, 12, "the estimate should track the load");
-    }
-
     @org.junit.jupiter.api.AfterEach
     void noCollisionsWhateverHappened() {
         RobotSim.assertNoViolationsNow();
