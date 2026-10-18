@@ -155,8 +155,8 @@ public class Constants {
          */
         public static abstract class DriveSpeedConstants{
             public static final double NormalScale = 0.80; // driving with nothing going on
-            public static final double IntakeScale = 0.75; // while intaking
-            public static final double TurboScale = 1.00;  // after the Back button toggle
+            public static final double IntakeScale = 0.6; // while intaking
+            public static final double TurboScale = 1.00;  // after th e Back button toggle
         }
 
         public static abstract class OutpostConstants{

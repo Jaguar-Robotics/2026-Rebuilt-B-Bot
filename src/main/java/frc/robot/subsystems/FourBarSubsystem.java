@@ -69,6 +69,8 @@ public class FourBarSubsystem extends SubsystemBase implements AutoCloseable {
         return t;
     }
 
+    //Current Limit in tuner : 55
+
     private static final double kUp = FourBarConstants.UpStopRot;
     private static final double kDown = FourBarConstants.DownStopRot;
 

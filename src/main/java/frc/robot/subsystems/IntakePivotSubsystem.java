@@ -66,6 +66,8 @@ public class IntakePivotSubsystem extends SubsystemBase {
         return t;
     }
 
+    //Current Limit in tuner : 55
+
     private static final double kLowDeg = Constants.IntakeConstants.PivotLowSetpoint.in(Degrees);
     private static final double kHighDeg = Constants.IntakeConstants.PivotHighSetpoint.in(Degrees);
 

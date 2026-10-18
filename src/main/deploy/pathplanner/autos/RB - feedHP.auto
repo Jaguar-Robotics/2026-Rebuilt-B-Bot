@@ -1,0 +1,49 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "path",
+          "data": {
+            "pathName": "RB - feedHp"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Poop"
+          }
+        },
+        {
+          "type": "wait",
+          "data": {
+            "waitTime": 2.0
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ScoreDepot - pushing in"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Keep Pushing"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Keep Pushing"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}

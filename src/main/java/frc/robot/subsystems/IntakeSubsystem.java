@@ -35,7 +35,7 @@ public class IntakeSubsystem extends SubsystemBase {
     intakeReversedMotor.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
     intakeReversedMotorTwo.setControl(new Follower(Constants.IntakeConstants.IntakeLeaderID, MotorAlignmentValue.Opposed));
 
-    limitConfigs.SupplyCurrentLimit = 20;
+    limitConfigs.SupplyCurrentLimit = 18;
     limitConfigs.SupplyCurrentLimitEnable = true;
 
     intakeLeaderConfigurator.apply(limitConfigs);

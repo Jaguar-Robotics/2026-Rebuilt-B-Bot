@@ -29,6 +29,6 @@
   "bumperOffsetX": 0.0,
   "bumperOffsetY": 0.0,
   "robotFeatures": [
-    "{\"name\":\"Rectangle\",\"type\":\"rounded_rect\",\"data\":{\"center\":{\"x\":-0.517525,\"y\":0.0},\"size\":{\"width\":0.978,\"length\":0.3048},\"borderRadius\":0.005,\"strokeWidth\":0.01,\"filled\":false}}"
+    "{\"name\":\"Rectangle\",\"type\":\"rounded_rect\",\"data\":{\"center\":{\"x\":0.518,\"y\":0.0},\"size\":{\"width\":0.978,\"length\":0.3048},\"borderRadius\":0.005,\"strokeWidth\":0.01,\"filled\":false}}"
   ]
 }
