@@ -26,7 +26,7 @@ public class FourBarHandler extends SubsystemBase implements StateSubsystem {
 
     public enum FourBarState implements State {
         FLAT,   // floor flat: the default, boot, intaking and stowed
-        RAISED // floor tilted up so balls roll to the intake: only while outtaking
+        RAISED // floor tilted up so balls roll to the intake: only while outtaking 
   }
 
   private static FourBarHandler instance;

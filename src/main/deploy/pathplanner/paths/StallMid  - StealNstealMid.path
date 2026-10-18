@@ -3,13 +3,13 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 6.501644345238095,
-        "y": 7.402053571428571
+        "x": 5.77575,
+        "y": 7.399677419354839
       },
       "prevControl": null,
       "nextControl": {
-        "x": 7.501644345238095,
-        "y": 7.402053571428571
+        "x": 6.77575,
+        "y": 7.399677419354839
       },
       "isLocked": false,
       "linkedName": "StallMidDepot"
