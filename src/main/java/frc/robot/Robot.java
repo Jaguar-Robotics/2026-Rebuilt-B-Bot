@@ -12,6 +12,7 @@ import frc.robot.tuning.PerfMonitor;
 import frc.robot.tuning.Tunables;
 import frc.robot.util.HubShiftUtil;
 import frc.robot.util.HubShiftUtil.ShiftInfo;
+import edu.wpi.first.wpilibj.DataLogManager;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -31,7 +32,8 @@ public class Robot extends TimedRobot {
 
     public Robot() {
         m_robotContainer = new RobotContainer();
-    }
+        DataLogManager.start(); 
+     }
 
     /** For simulation tests that drive the whole robot. */
     public RobotContainer getRobotContainer() {
